@@ -6,7 +6,7 @@ import type { Ticket } from "./store";
 import type { Harness } from "./db";
 
 process.env.FACTORY_HOME = mkdtempSync(join(tmpdir(), "factory-test-")); // before the db module opens ~/.factory
-const { bashPath, doctor, effectiveQuality, scopesOverlap, pickReviewer, pickWorker } = await import("./supervisor");
+const { bashPath, doctor, effectiveQuality, scopesOverlap, pickReviewer, pickWorker, reviewerCheck } = await import("./supervisor");
 const { DEFAULT_SETTINGS } = await import("./store");
 const { db } = await import("./db");
 
@@ -170,6 +170,37 @@ test("pickReviewer: never comes from the worker's harness when the worker isn't 
     "claude:opus": { cost: 8, quality: 5, family: "claude" },
   };
   expect(pickReviewer(s, { harness: "claude", model: "not-in-catalog" })).toEqual({ harness: "pi", model: "" });
+});
+
+test("reviewerCheck: a same-harness reviewer from a different family passes", () => {
+  const s = structuredClone(DEFAULT_SETTINGS);
+  s.default_harness = "commandcode";
+  s.harnesses.commandcode.enabled = true;
+  s.harnesses.commandcode.model = "deepseek/deepseek-v4.1-flash";
+  s.catalog = {
+    "commandcode:deepseek/deepseek-v4.1-flash": { cost: 1, quality: 3, family: "deepseek" },
+    "commandcode:z-ai/glm-5.3-flashx": { cost: 2, quality: 4, family: "glm" },
+  };
+  expect(reviewerCheck(s)).toEqual({ ok: true, detail: "commandcode/deepseek/deepseek-v4.1-flash → commandcode/z-ai/glm-5.3-flashx (deepseek → glm)" });
+});
+
+test("reviewerCheck: a reviewer whose family matches the worker fails, even on another harness", () => {
+  const s = structuredClone(DEFAULT_SETTINGS);
+  s.harnesses.pi.enabled = false;
+  s.harnesses.commandcode.enabled = true;
+  s.reviewer_models.commandcode = "glm";
+  s.catalog = {
+    "claude:sonnet": { cost: 5, quality: 4, family: "claude" },
+    "commandcode:glm": { cost: 1, quality: 5, family: "claude" },
+  };
+  expect(reviewerCheck(s)).toEqual({ ok: false, detail: "claude/sonnet → commandcode/glm (claude → claude)" });
+});
+
+test("reviewerCheck: an empty catalog keeps the harness rule", () => {
+  expect(reviewerCheck(structuredClone(DEFAULT_SETTINGS))).toEqual({ ok: true, detail: "claude → pi" });
+  const s = structuredClone(DEFAULT_SETTINGS);
+  s.harnesses.pi.enabled = false;
+  expect(reviewerCheck(s)).toEqual({ ok: false, detail: "claude → claude/opus" });
 });
 
 test("doctor's bin:bash check points at the bash the gate actually runs", () => {

@@ -701,6 +701,17 @@ export function shutdownAll() {
   handles.clear();
 }
 
+/** Doctor's cross-family check: with a catalog, the reviewer's `family` must differ from the default worker pair's;
+ *  when the catalog is empty, or either pair is missing from it, fall back to the older harness comparison. */
+export function reviewerCheck(s: store.Settings): { ok: boolean; detail: string } {
+  const worker = { harness: s.default_harness, model: s.harnesses[s.default_harness].model };
+  const r = pickReviewer(s, worker);
+  const wf = s.catalog[`${worker.harness}:${worker.model}`]?.family;
+  const rf = s.catalog[`${r.harness}:${r.model}`]?.family;
+  if (Object.keys(s.catalog).length && wf !== undefined && rf !== undefined) return { ok: wf !== rf, detail: `${worker.harness}/${worker.model} → ${r.harness}/${r.model} (${wf} → ${rf})` };
+  return { ok: r.harness !== s.default_harness, detail: `${s.default_harness} → ${r.harness}${r.model ? "/" + r.model : ""}` };
+}
+
 export function doctor(ws?: string) {
   const checks: { name: string; ok: boolean; detail: string }[] = [];
   const add = (name: string, ok: boolean, detail = "") => checks.push({ name, ok, detail });
@@ -717,8 +728,8 @@ export function doctor(ws?: string) {
     add(`${w.id}: rules.md scanned`, !/run \/factory:init/.test(store.loadRules(w.path)), "standing orders");
     add(`${w.id}: verify recipe`, existsSync(join(w.path, ".factory", "verify.md")), ".factory/verify.md");
     for (const [h, c] of Object.entries(s.harnesses)) if (c.enabled) add(`${w.id}: harness ${h}`, !!Bun.which(h), c.model || "default model");
-    const r = pickReviewer(s, { harness: s.default_harness, model: s.harnesses[s.default_harness].model });
-    add(`${w.id}: cross-family reviewer`, r.harness !== s.default_harness, `${s.default_harness} → ${r.harness}${r.model ? "/" + r.model : ""}`);
+    const rc = reviewerCheck(s);
+    add(`${w.id}: cross-family reviewer`, rc.ok, rc.detail);
     const invalid = store.listTickets(w.path).filter((t) => t.status === "open" && store.validateBrief(t).length);
     add(`${w.id}: open tickets have valid briefs`, !invalid.length, invalid.map((t) => t.id).join(", "));
   }
