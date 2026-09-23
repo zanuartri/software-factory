@@ -2,6 +2,9 @@
 
 Proven 2026-09-24 in bash (Git Bash). Uses an isolated daemon so the live one on :4545 is never touched.
 
+`verify_cmd` (settings) runs in a **fresh checkout without node_modules**, so it must start with
+`bun install --frozen-lockfile` (root and `ui/`). Proven in a clean `git worktree` (2026-09-24).
+
 ## Launch
 ```bash
 REPO=$(git rev-parse --show-toplevel)

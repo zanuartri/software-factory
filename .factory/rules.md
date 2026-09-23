@@ -12,7 +12,7 @@
 10. Daemon routes live in the `routes` table in `src/daemon.ts`; errors are thrown and turned into 400 JSON by `wrap` — don't add try/catch per route.
 11. CLI output goes through `out()`, fatal errors through `die()` in `src/cli.ts`.
 12. SQLite schema lives in `src/db.ts`; any schema change must be additive (new column/table with default), never drop or rename.
-13. Never start or kill the live daemon on port 4545 or touch `~/.factory`; for manual checks use `FACTORY_PORT=4646 FACTORY_HOME=<tmp dir>`.
+13. Never start or kill any daemon or touch `~/.factory`; don't attempt manual daemon checks (setting env vars is blocked for workers) — unit tests are your evidence, the coordinator does live checks.
 14. Forbidden paths: `bun.lock`, `ui/bun.lock`, `ui/dist/**`, `node_modules/**`, `.factory/**`, `.env*`.
 15. Changes to `plugin/**` or `harness/**` are prompts/contracts other agents read — edit only when the brief names them.
 16. Commits: conventional style `type(scope): summary` (feat, fix, polish, chore), lowercase, imperative.

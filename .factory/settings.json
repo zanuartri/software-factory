@@ -3,31 +3,49 @@
   "harnesses": {
     "claude": {
       "enabled": true,
-      "model": "sonnet",
+      "model": "claude-sonnet-5",
       "models": [
         "sonnet",
         "opus",
-        "haiku"
+        "haiku",
+        "claude-opus-5-5",
+        "claude-sonnet-5"
       ]
     },
     "pi": {
       "enabled": true,
-      "model": "",
-      "models": []
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "models": [
+        "opencode-go/deepseek-v4.1-flash",
+        "opencode-go/glm-5.3-flash",
+        "opencode-go/hy3",
+        "opencode-go/mimo-v2.6-flash"
+      ]
     },
     "opencode": {
       "enabled": true,
-      "model": "",
-      "models": []
+      "model": "opencode-go/mimo-v2.6-flash",
+      "models": [
+        "opencode-go/deepseek-v4.1-flash",
+        "opencode-go/glm-5.3-flash",
+        "opencode-go/hy3",
+        "opencode-go/mimo-v2.6-flash"
+      ]
     },
     "commandcode": {
       "enabled": true,
-      "model": "",
-      "models": []
+      "model": "deepseek/deepseek-v4.1-flash",
+      "models": [
+        "deepseek/deepseek-v4.1-flash",
+        "z-ai/glm-5.3-flash",
+        "z-ai/glm-5.3-flashx",
+        "typesafe/jev",
+        "xiaomi/mimo-v2.6-flash"
+      ]
     }
   },
-  "default_harness": "claude",
-  "max_workers": 3,
+  "default_harness": "commandcode",
+  "max_workers": 5,
   "reviewer_order": [
     "pi",
     "opencode",
@@ -35,12 +53,95 @@
     "claude"
   ],
   "reviewer_models": {
-    "claude": "opus",
-    "pi": "",
-    "opencode": "",
-    "commandcode": ""
+    "claude": "claude-opus-5-5",
+    "pi": "opencode-go/glm-5.3-flash",
+    "opencode": "opencode-go/deepseek-v4.1-flash",
+    "commandcode": "z-ai/glm-5.3-flashx"
   },
-  "verify_cmd": "bun test src && bunx tsc -p . && cd ui && bunx tsc -p . --noEmit && bun run build",
+  "verify_cmd": "bun install --frozen-lockfile && bun test src && bunx tsc -p . && cd ui && bun install --frozen-lockfile && bunx tsc -p . --noEmit && bun run build",
+  "catalog": {
+    "commandcode:deepseek/deepseek-v4.1-flash": {
+      "cost": 1,
+      "quality": 3,
+      "family": "deepseek"
+    },
+    "commandcode:xiaomi/mimo-v2.6-flash": {
+      "cost": 1,
+      "quality": 3,
+      "family": "mimo"
+    },
+    "commandcode:typesafe/jev": {
+      "cost": 1,
+      "quality": 2,
+      "family": "typesafe"
+    },
+    "commandcode:z-ai/glm-5.3-flash": {
+      "cost": 1.5,
+      "quality": 3,
+      "family": "glm"
+    },
+    "commandcode:z-ai/glm-5.3-flashx": {
+      "cost": 1.5,
+      "quality": 4,
+      "family": "glm"
+    },
+    "pi:opencode-go/deepseek-v4.1-flash": {
+      "cost": 2,
+      "quality": 3,
+      "family": "deepseek"
+    },
+    "pi:opencode-go/mimo-v2.6-flash": {
+      "cost": 2,
+      "quality": 3,
+      "family": "mimo"
+    },
+    "pi:opencode-go/hy3": {
+      "cost": 2,
+      "quality": 3,
+      "family": "hunyuan"
+    },
+    "pi:opencode-go/glm-5.3-flash": {
+      "cost": 2.5,
+      "quality": 3,
+      "family": "glm"
+    },
+    "opencode:opencode-go/deepseek-v4.1-flash": {
+      "cost": 2,
+      "quality": 3,
+      "family": "deepseek"
+    },
+    "opencode:opencode-go/mimo-v2.6-flash": {
+      "cost": 2,
+      "quality": 3,
+      "family": "mimo"
+    },
+    "opencode:opencode-go/hy3": {
+      "cost": 2,
+      "quality": 3,
+      "family": "hunyuan"
+    },
+    "opencode:opencode-go/glm-5.3-flash": {
+      "cost": 2.5,
+      "quality": 3,
+      "family": "glm"
+    },
+    "claude:claude-sonnet-5": {
+      "cost": 8,
+      "quality": 4,
+      "family": "anthropic",
+      "caps": [
+        "ui"
+      ]
+    },
+    "claude:claude-opus-5-5": {
+      "cost": 15,
+      "quality": 5,
+      "family": "anthropic",
+      "caps": [
+        "ui"
+      ]
+    }
+  },
   "allowed_tools": [
     "Bash(git:*)",
     "Bash(bun:*)",
