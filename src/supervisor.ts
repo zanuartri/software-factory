@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { ADAPTERS, killTree, type Handle, type NormEvent } from "./adapters";
 import { BASE_URL, db, emit, getRun, getWs, HOME, updateRun, type Harness, type Run, type Workspace } from "./db";
 import * as git from "./git";
@@ -72,8 +72,26 @@ function pendingMessages(runId: string) {
   return `\n\n📨 Messages from the coordinator (these override your plan — acknowledge with factory_decision):\n${rows.map((r) => `- ${r.body}`).join("\n")}`;
 }
 
+const SYSTEM32_BASH = /[\\/]windows[\\/]system32[\\/]/i;
+let bashCache: string | undefined;
+
+/**
+ * Windows has two `bash`: Git Bash and `C:\WINDOWS\system32\bash.exe`, the WSL launcher — from a PowerShell-started
+ * daemon PATH finds WSL first and every Verify dies with "execvpe(/bin/bash) failed". Git Bash lives at
+ * `<git root>/bin/bash.exe` (or `usr/bin`), so walk up from the git on PATH instead of trusting PATH. Computed once.
+ */
+export function bashPath(): string {
+  if (bashCache) return bashCache;
+  if (process.platform !== "win32") return (bashCache = "bash");
+  const git = Bun.which("git");
+  const roots: string[] = [];
+  if (git && !SYSTEM32_BASH.test(git)) for (let d = dirname(git); dirname(d) !== d; d = dirname(d)) roots.push(d);
+  const found = roots.flatMap((r) => [join(r, "bin", "bash.exe"), join(r, "usr", "bin", "bash.exe")]).find((p) => existsSync(p) && !SYSTEM32_BASH.test(p));
+  return (bashCache = found ?? "C:\\Program Files\\Git\\bin\\bash.exe");
+}
+
 async function sh(cmd: string, cwd: string, timeoutMs = 15 * 60e3) {
-  const p = Bun.spawn(["bash", "-c", cmd], { cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, CI: "1" }, windowsHide: true });
+  const p = Bun.spawn([bashPath(), "-c", cmd], { cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, CI: "1" }, windowsHide: true });
   const timer = setTimeout(() => killTree(p.pid), timeoutMs);
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
   clearTimeout(timer);
@@ -620,7 +638,10 @@ export function shutdownAll() {
 export function doctor(ws?: string) {
   const checks: { name: string; ok: boolean; detail: string }[] = [];
   const add = (name: string, ok: boolean, detail = "") => checks.push({ name, ok, detail });
-  for (const bin of ["git", "bash", "claude", "pi", "opencode", "commandcode", "gh"]) add(`bin:${bin}`, !!Bun.which(bin), Bun.which(bin) ?? "not on PATH");
+  for (const bin of ["git", "claude", "pi", "opencode", "commandcode", "gh"]) add(`bin:${bin}`, !!Bun.which(bin), Bun.which(bin) ?? "not on PATH");
+  const bash = bashPath();
+  const bashOk = process.platform === "win32" ? existsSync(bash) : !!Bun.which(bash);
+  add("bin:bash", bashOk, bashOk ? bash : `${bash} not found (PATH bash: ${Bun.which("bash") ?? "none"})`);
   const orphans = db.query("SELECT * FROM runs WHERE status IN ('starting','running','gating') ").all() as Run[];
   for (const r of orphans) if (!handles.has(r.id)) add(`orphan run ${r.id}`, false, `${r.ticket} ${r.status} but no live process — \`factory tell ${r.ticket}\` to resume`);
   for (const w of ws ? [mustWs(ws)] : listWorkspaces()) {

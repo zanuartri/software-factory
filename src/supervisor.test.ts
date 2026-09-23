@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.FACTORY_HOME = mkdtempSync(join(tmpdir(), "factory-test-")); // before the db module opens ~/.factory
-const { scopesOverlap, pickReviewer } = await import("./supervisor");
+const { bashPath, doctor, scopesOverlap, pickReviewer } = await import("./supervisor");
 const { DEFAULT_SETTINGS } = await import("./store");
 
 test("scope overlap decides what may run in parallel", () => {
@@ -21,4 +21,19 @@ test("reviewer comes from a different harness when one is enabled", () => {
   expect(pickReviewer(s, "pi").harness).toBe("claude");
   s.harnesses.pi.enabled = false;
   expect(pickReviewer(s, "claude")).toEqual({ harness: "claude", model: "opus" }); // same harness, different model
+});
+
+test("bashPath is Git Bash on Windows, never the System32 WSL launcher", () => {
+  if (process.platform !== "win32") return void expect(bashPath()).toBe("bash");
+  expect(bashPath()).not.toMatch(/\\windows\\system32\\/i);
+  expect(existsSync(bashPath())).toBe(true);
+});
+
+test("doctor's bin:bash check points at the bash the gate actually runs", () => {
+  const c = doctor().find((x) => x.name === "bin:bash")!;
+  expect(c.detail).not.toMatch(/\\windows\\system32\\/i);
+  if (process.platform === "win32") {
+    expect(c.ok).toBe(true);
+    expect(c.detail).toBe(bashPath());
+  }
 });
