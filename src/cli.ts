@@ -174,9 +174,11 @@ switch (cmd) {
   case "stop": { const w = await currentWs(); await api("POST", `/api/ws/${w.id}/stop`); out("plan stopped (running workers continue; use factory kill to stop them)"); break; }
 
   case "wait": {
+    const t = flags.timeout === undefined ? 240 : typeof flags.timeout === "string" ? Number(flags.timeout) : NaN;
+    if (!(t >= 1)) die("--timeout must be a number of seconds ≥ 1");
     const w = await currentWs();
     const since = existsSync(cursorFile(w.id)) ? Number(readFileSync(cursorFile(w.id), "utf8")) : 0;
-    const res = await api("GET", `/api/ws/${w.id}/wait?since=${flags.since ?? since}&timeout=${Math.min(Number(flags.timeout ?? 240), 240)}`);
+    const res = await api("GET", `/api/ws/${w.id}/wait?since=${flags.since ?? since}&timeout=${Math.min(t, 240)}`);
     writeFileSync(cursorFile(w.id), String(res.cursor));
     out(res.events.length ? res.events.map(fmtEvent).join("\n") : "(no coordinator events — still working; run `factory wait` again)", res);
     break;
