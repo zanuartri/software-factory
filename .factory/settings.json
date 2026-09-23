@@ -70,11 +70,6 @@
       "quality": 3,
       "family": "mimo"
     },
-    "commandcode:typesafe/jev": {
-      "cost": 1,
-      "quality": 2,
-      "family": "typesafe"
-    },
     "commandcode:z-ai/glm-5.3-flash": {
       "cost": 1.5,
       "quality": 3,
