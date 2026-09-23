@@ -22,7 +22,7 @@ Load the `factory-coordinator` skill first.
    capture, where), Cleanup (kill only what you started; keep evidence), and a short **feature map** of the top 3–5
    user-facing features with how to reach and prove each. **Prove it once:** run launch → doctor → drive one feature →
    cleanup, and fix the recipe until it works.
-6. Update settings with `factory settings set '{...}'`: `base_branch`, `verify_cmd` (the full suite that must pass on
+6. Update settings with `factory settings set '{...}'` (or, PowerShell-safe, `factory settings set max_workers=3 verify_cmd="bun test"`): `base_branch`, `verify_cmd` (the full suite that must pass on
    base after every merge), `allowed_tools` (Claude Bash allowlist for this stack), harness enable flags and default
    models for what's installed, `default_harness`, `max_workers`, and `reviewer_order` (the first entry must differ
    from `default_harness` for cross-family review).

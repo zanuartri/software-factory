@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { BASE_URL, HOME } from "./db";
 import { repoRoot } from "./git";
 import { ROOT } from "./prompts";
+import { settingsPatch } from "./store";
 
 const argv = process.argv.slice(2);
 const flags: Record<string, string | boolean> = {};
@@ -199,7 +200,12 @@ switch (cmd) {
   }
   case "settings": {
     const w = await currentWs();
-    if (sub === "set") { const patch = JSON.parse(rest.join(" ")); out(JSON.stringify(await api("PUT", `/api/ws/${w.id}/settings`, patch), null, 2)); }
+    if (sub === "set") {
+      const current = await api("GET", `/api/ws/${w.id}/settings`);
+      let patch: unknown;
+      try { patch = settingsPatch(current as any, rest); } catch (e: any) { die(e.message); }
+      out(JSON.stringify(await api("PUT", `/api/ws/${w.id}/settings`, patch), null, 2));
+    }
     else out(JSON.stringify(await api("GET", `/api/ws/${w.id}/settings`), null, 2));
     break;
   }
