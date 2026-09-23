@@ -61,45 +61,6 @@ export function loadSettings(repo: string): Settings {
   return { ...DEFAULT_SETTINGS, ...raw, harnesses };
 }
 export const saveSettings = (repo: string, s: Settings) => writeFileSync(dir(repo, "settings.json"), JSON.stringify(s, null, 2) + "\n");
-
-/** PowerShell 5.1 strips embedded double quotes, so `["claude"]` arrives as `[claude]` and JSON.parse fails.
- *  When the current value at this key is an array, fall back to a comma list (with or without brackets)
- *  instead of saving the raw string. */
-function coerceValue(raw: string, currentVal: unknown): unknown {
-  if (Array.isArray(currentVal)) {
-    try { const j = JSON.parse(raw); if (Array.isArray(j)) return j; } catch {}
-    let s = raw.trim();
-    if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1).trim();
-    return s === "" ? [] : s.split(",").map((x) => x.trim()).filter((x) => x !== "");
-  }
-  try { return JSON.parse(raw); } catch { return raw; }
-}
-
-/** CLI form for `factory settings set`: a single JSON arg (old behavior), or shell-safe `a.b.c=value` pairs
- *  (PowerShell can't pass embedded quotes). Nested keys deep-merge onto `current`; only touched top-level
- *  keys are returned so the daemon's shallow-merge PUT doesn't clobber sibling fields (e.g. other harnesses). */
-export function settingsPatch(current: Settings, args: string[]): Partial<Settings> {
-  const joined = args.join(" ").trim();
-  if (joined.startsWith("{")) return JSON.parse(joined);
-  const next: any = structuredClone(current);
-  const touched = new Set<string>();
-  for (const a of args) {
-    const eq = a.indexOf("=");
-    if (eq < 0) throw new Error(`invalid pair (missing '='): ${a}`);
-    const key = a.slice(0, eq);
-    if (!key) throw new Error(`invalid pair (empty key): ${a}`);
-    const parts = key.split(".");
-    touched.add(parts[0]);
-    let obj = next;
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (typeof obj[parts[i]] !== "object" || obj[parts[i]] == null) obj[parts[i]] = {};
-      obj = obj[parts[i]];
-    }
-    const leaf = parts.at(-1)!;
-    obj[leaf] = coerceValue(a.slice(eq + 1), obj[leaf]);
-  }
-  return Object.fromEntries([...touched].map((k) => [k, next[k]]));
-}
 export const loadRules = (repo: string) => (existsSync(dir(repo, "rules.md")) ? readFileSync(dir(repo, "rules.md"), "utf8") : "");
 export const saveRules = (repo: string, text: string) => writeFileSync(dir(repo, "rules.md"), text);
 
