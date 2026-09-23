@@ -10,7 +10,7 @@ export const ISSUE_STATUSES = ["open", "triaged", "ticketed", "stale", "closed"]
 export type Ticket = {
   id: string; title: string; status: Status; priority: "p0" | "p1" | "p2" | "p3";
   tags: string[]; depends_on: string[]; scope_paths: string[];
-  harness: Harness | "any"; model: string; blocked?: string | null; failed?: string | null;
+  harness: Harness | "any"; model: string; difficulty: "low" | "medium" | "high"; blocked?: string | null; failed?: string | null;
   issue?: string | null; branch?: string | null; attempts?: number; created: string;
   sections: Record<string, string>; file: string;
 };
@@ -35,6 +35,8 @@ export const DEFAULT_SETTINGS = {
   reviewer_order: ["pi", "opencode", "commandcode", "claude"] as Harness[],
   reviewer_models: { claude: "opus", pi: "", opencode: "", commandcode: "" } as Record<Harness, string>,
   verify_cmd: "",
+  /** cost-first routing: keyed "<harness>:<model>"; empty = today's pickHarness/pickReviewer behavior unchanged */
+  catalog: {} as Record<string, { cost: number; quality: number; family: string; caps?: string[] }>,
   /** claude permission allowlist for workers; the guard hook still vetoes push/force/out-of-scope */
   allowed_tools: ["Bash(git:*)", "Bash(bun:*)", "Bash(npm:*)", "Bash(npx:*)", "Bash(pnpm:*)", "Bash(node:*)", "Bash(ls:*)",
     "Bash(cat:*)", "Bash(rg:*)", "Bash(grep:*)", "Bash(find:*)", "Bash(mkdir:*)", "Bash(python:*)", "Bash(pytest:*)", "Bash(cargo:*)", "Bash(go:*)", "Bash(make:*)"],
@@ -109,7 +111,7 @@ function parseMd(text: string): { fm: any; body: string } {
   return { fm: Bun.YAML.parse(m[1]) ?? {}, body: m[2] };
 }
 // Hand-written so humans get `tags: [a, b]` in a stable order; JSON strings are valid YAML scalars.
-const ORDER = ["id", "title", "status", "priority", "kind", "tags", "depends_on", "scope_paths", "harness", "model", "blocked", "failed", "issue", "tickets", "branch", "attempts", "reason", "created"];
+const ORDER = ["id", "title", "status", "priority", "kind", "tags", "depends_on", "scope_paths", "harness", "model", "difficulty", "blocked", "failed", "issue", "tickets", "branch", "attempts", "reason", "created"];
 const yv = (x: unknown): string =>
   Array.isArray(x) ? `[${x.map(yv).join(", ")}]`
   : x == null ? "null"
@@ -144,7 +146,7 @@ function listMd(d: string) {
 export function readTicket(file: string): Ticket {
   const { fm, body } = parseMd(readFileSync(file, "utf8"));
   return {
-    priority: "p2", tags: [], depends_on: [], scope_paths: [], harness: "any", model: "default", status: "draft",
+    priority: "p2", tags: [], depends_on: [], scope_paths: [], harness: "any", model: "default", difficulty: "medium", status: "draft",
     ...fm, id: String(fm.id), sections: parseSections(body), file,
   };
 }
@@ -166,7 +168,7 @@ export function createTicket(repo: string, input: Partial<Ticket> & { title: str
   const t: Ticket = {
     id, title: input.title, status: "draft", priority: input.priority ?? "p2", tags: input.tags ?? [],
     depends_on: input.depends_on ?? [], scope_paths: input.scope_paths ?? [], harness: input.harness ?? "any",
-    model: input.model ?? "default", issue: input.issue ?? null, created: new Date().toISOString(),
+    model: input.model ?? "default", difficulty: input.difficulty ?? "medium", issue: input.issue ?? null, created: new Date().toISOString(),
     sections: { Goal: "", Context: "", Acceptance: "- [ ] ", Verify: "", Timebox: "60m", Forbidden: "no push, no force, nothing outside scope_paths", Report: "", ...input.sections },
     file: dir(repo, `tickets/${id}-${slug(input.title)}.md`),
   };

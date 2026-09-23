@@ -112,10 +112,49 @@ function pickHarness(s: store.Settings, t: store.Ticket, running: Run[]): Harnes
   return (Object.keys(s.harnesses) as Harness[]).find((h) => enabled(h) && free(h)) ?? null;
 }
 
-export function pickReviewer(s: store.Settings, impl: Harness): { harness: Harness; model: string } {
-  const h = s.reviewer_order.find((x) => x !== impl && s.harnesses[x]?.enabled);
+const MIN_QUALITY = { low: 2, medium: 3, high: 4 } as const;
+let pickSeq = 0;
+const lastPicked = new Map<string, number>(); // catalog key → seq, for round-robin among equal-cost ties
+
+/** Cheapest catalog pair that meets the ticket's difficulty (escalated per retry) and tag-driven caps.
+ *  Falls back to today's pickHarness + model logic when the catalog is empty or nothing qualifies. */
+export function pickWorker(s: store.Settings, t: store.Ticket, running: Run[], attempt = 1): { harness: Harness; model: string } | null {
+  const enabled = (h: Harness) => s.harnesses[h]?.enabled;
+  const free = (h: Harness) => running.filter((r) => r.role === "worker" && r.harness === h && r.status !== "idle" && r.status !== "paused").length < ((s.harnesses[h] as any).max ?? s.max_workers);
+  if (t.harness !== "any") {
+    if (!enabled(t.harness) || !free(t.harness)) return null;
+    return { harness: t.harness, model: t.model !== "default" ? t.model : s.harnesses[t.harness].model };
+  }
+  const minQuality = Math.min(5, MIN_QUALITY[t.difficulty ?? "medium"] + (attempt - 1));
+  const allCaps = new Set(Object.values(s.catalog).flatMap((c) => c.caps ?? []));
+  const requiredCaps = t.tags.filter((tag) => allCaps.has(tag));
+  const activeCount = (h: Harness) => running.filter((r) => r.role === "worker" && r.harness === h && r.status !== "idle" && r.status !== "paused").length;
+  const candidates = Object.entries(s.catalog)
+    .map(([key, c]) => ({ key, ...c, harness: key.slice(0, key.indexOf(":")) as Harness, model: key.slice(key.indexOf(":") + 1) }))
+    .filter((c) => enabled(c.harness) && free(c.harness) && c.quality >= minQuality && requiredCaps.every((tag) => (c.caps ?? []).includes(tag)));
+  if (candidates.length) {
+    candidates.sort((a, b) => a.cost - b.cost || activeCount(a.harness) - activeCount(b.harness) || (lastPicked.get(a.key) ?? 0) - (lastPicked.get(b.key) ?? 0));
+    const pick = candidates[0];
+    lastPicked.set(pick.key, ++pickSeq);
+    return { harness: pick.harness, model: pick.model };
+  }
+  const h = pickHarness(s, t, running);
+  return h ? { harness: h, model: t.model !== "default" ? t.model : s.harnesses[h].model } : null;
+}
+
+export function pickReviewer(s: store.Settings, impl: { harness: Harness; model: string }): { harness: Harness; model: string } {
+  if (Object.keys(s.catalog).length) {
+    const implEntry = s.catalog[`${impl.harness}:${impl.model}`];
+    const minQuality = Math.max(4, implEntry?.quality ?? 0);
+    const candidates = Object.entries(s.catalog)
+      .map(([key, c]) => ({ key, ...c, harness: key.slice(0, key.indexOf(":")) as Harness, model: key.slice(key.indexOf(":") + 1) }))
+      .filter((c) => s.harnesses[c.harness]?.enabled && c.quality >= minQuality && (!implEntry || c.family !== implEntry.family))
+      .sort((a, b) => a.cost - b.cost);
+    if (candidates.length) return { harness: candidates[0].harness, model: candidates[0].model };
+  }
+  const h = s.reviewer_order.find((x) => x !== impl.harness && s.harnesses[x]?.enabled);
   if (h) return { harness: h, model: s.reviewer_models[h] || s.harnesses[h].model };
-  return { harness: impl, model: s.reviewer_models[impl] || s.harnesses[impl].model }; // same harness, different model (settings)
+  return { harness: impl.harness, model: s.reviewer_models[impl.harness] || s.harnesses[impl.harness].model }; // same harness, different model (settings)
 }
 
 // ------------------------------------------------------------------ scheduling
@@ -167,10 +206,10 @@ function schedulePass(ws: string) {
     if (workers.length >= s.max_workers) break;
     const busy = workers.filter((r) => r.ticket !== t.id).map((r) => byId.get(r.ticket)).filter(Boolean) as store.Ticket[];
     if (busy.some((b) => scopesOverlap(b.scope_paths, t.scope_paths))) continue;
-    const h = pickHarness(s, t, running);
-    if (!h) continue;
+    const picked = pickWorker(s, t, running);
+    if (!picked) continue;
     plan.started++;
-    spawnWorker(ws, t.id, { harness: h }).catch((e) => {
+    spawnWorker(ws, t.id, { harness: picked.harness, model: picked.model }).catch((e) => {
       store.updateTicket(w.path, t.id, { blocked: `spawn failed: ${e.message}` });
       emit(ws, "ticket.blocked", { reason: e.message }, { ticket: t.id, coordinator: true });
     });
@@ -191,7 +230,7 @@ function schedulePass(ws: string) {
 }
 
 // ------------------------------------------------------------------ spawning
-export async function spawnWorker(ws: string, ticketId: string, o: { harness?: Harness; resumeFrom?: Run; message?: string } = {}) {
+export async function spawnWorker(ws: string, ticketId: string, o: { harness?: Harness; model?: string; resumeFrom?: Run; message?: string } = {}) {
   const w = mustWs(ws), s = store.loadSettings(w.path);
   const t = store.getTicket(w.path, ticketId);
   if (!t) throw new Error(`no ticket ${ticketId}`);
@@ -202,12 +241,13 @@ export async function spawnWorker(ws: string, ticketId: string, o: { harness?: H
     const parked = db.query("SELECT id FROM runs WHERE ws=? AND ticket=? AND role='worker' AND status IN ('idle','paused')").all(ws, ticketId) as { id: string }[];
     for (const { id } of parked) { clearTimers(id); handles.get(id)?.kill(); handles.delete(id); updateRun(id, { status: "killed", ended_at: Date.now() }); }
   }
-  const harness = o.resumeFrom?.harness ?? o.harness ?? pickHarness(s, t, activeRuns(ws)) ?? s.default_harness;
+  const attempt = (o.resumeFrom?.attempt ?? t.attempts ?? 0) + (o.resumeFrom ? 0 : 1);
+  const auto = o.resumeFrom || o.harness ? null : pickWorker(s, t, activeRuns(ws), attempt);
+  const harness = o.resumeFrom?.harness ?? o.harness ?? auto?.harness ?? s.default_harness;
   if (!s.harnesses[harness]?.enabled) throw new Error(`harness ${harness} is disabled in settings`);
   const branch = t.branch ?? `factory/${t.id}-${t.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30).replace(/-$/, "")}`;
   const worktree = git.addWorktree(w.path, git.worktreePath(ws, t.id), branch, s.base_branch);
-  const attempt = (o.resumeFrom?.attempt ?? t.attempts ?? 0) + (o.resumeFrom ? 0 : 1);
-  const model = t.model !== "default" ? t.model : s.harnesses[harness].model;
+  const model = o.model ?? auto?.model ?? (t.model !== "default" ? t.model : s.harnesses[harness].model);
   const id = `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const token = crypto.randomUUID();
   db.query("INSERT INTO runs (id,ws,ticket,role,harness,model,status,phase,worktree,branch,attempt,token,started_at,heartbeat_at,session_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
@@ -453,7 +493,7 @@ async function gate(workerRunId: string, report: string) {
 
 async function review(worker: Run, t: store.Ticket, s: store.Settings, report: string, verifyLog: string) {
   const w = getWs(worker.ws)!;
-  const { harness, model } = pickReviewer(s, worker.harness);
+  const { harness, model } = pickReviewer(s, { harness: worker.harness, model: worker.model ?? "" });
   const stat = git.git(worker.worktree!, "diff", "--stat", `${s.base_branch}...HEAD`).out;
   const diff = git.git(worker.worktree!, "diff", `${s.base_branch}...HEAD`).out;
   const id = `r-${Date.now().toString(36)}-rv`;
@@ -651,7 +691,7 @@ export function doctor(ws?: string) {
     add(`${w.id}: rules.md scanned`, !/run \/factory:init/.test(store.loadRules(w.path)), "standing orders");
     add(`${w.id}: verify recipe`, existsSync(join(w.path, ".factory", "verify.md")), ".factory/verify.md");
     for (const [h, c] of Object.entries(s.harnesses)) if (c.enabled) add(`${w.id}: harness ${h}`, !!Bun.which(h), c.model || "default model");
-    const r = pickReviewer(s, s.default_harness);
+    const r = pickReviewer(s, { harness: s.default_harness, model: s.harnesses[s.default_harness].model });
     add(`${w.id}: cross-family reviewer`, r.harness !== s.default_harness, `${s.default_harness} → ${r.harness}${r.model ? "/" + r.model : ""}`);
     const invalid = store.listTickets(w.path).filter((t) => t.status === "open" && store.validateBrief(t).length);
     add(`${w.id}: open tickets have valid briefs`, !invalid.length, invalid.map((t) => t.id).join(", "));

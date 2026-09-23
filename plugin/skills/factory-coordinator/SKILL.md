@@ -48,6 +48,7 @@ A worker can't ask you what you meant. A vague brief fails quietly. Every ticket
 - **Timebox:** 15m–2h. Longer means the ticket is too big.
 - **Forbidden:** unit-specific bans (no new deps, no schema change, don't touch public API ...).
 - **harness/model:** leave `any`/`default` unless you have a reason (e.g. a UI-heavy ticket goes to claude).
+- **difficulty:** `low`/`medium`/`high`, defaults to `medium`. Drives cost-first routing (a `catalog` in settings) — set it honestly, don't leave `harness`/`model` pinned unless there's a reason.
 
 ## Drain loop (after `factory run`)
 

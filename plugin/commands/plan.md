@@ -15,5 +15,5 @@ Load the `factory-coordinator` skill first.
    fail today. Put the grilling decisions each ticket depends on into its Context. Don't make the worker rediscover them.
 4. Create each one with `factory ticket new --title "..." [--issue I-x] --tags ...`, then fill in the sections and
    frontmatter in the file. If they came from an issue, run `factory issue set I-x status=ticketed tickets=T-a,T-b`.
-5. Show a table (id, title, deps, scope, timebox, harness) and the dependency order. They stay **draft**.
+5. Show a table (id, title, deps, scope, timebox, harness, difficulty) and the dependency order. They stay **draft**.
    `/factory:release` opens them.
