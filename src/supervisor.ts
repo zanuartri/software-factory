@@ -113,6 +113,31 @@ function pickHarness(s: store.Settings, t: store.Ticket, running: Run[]): Harnes
 }
 
 const MIN_QUALITY = { low: 2, medium: 3, high: 4 } as const;
+
+const QUALITY_TTL = 60e3;
+const qualityCache = new Map<string, { passes: number; total: number; at: number }>();
+/** A pass must see the outcomes it just produced, so clear the record at the start of every schedule pass. */
+const clearQualityCache = () => qualityCache.clear();
+
+/** Last 30 gate outcomes (worker runs only, all workspaces) for one catalog pair, cached ~60s / per pass. */
+function gateRecord(key: string) {
+  const hit = qualityCache.get(key);
+  if (hit && Date.now() - hit.at < QUALITY_TTL) return hit;
+  const i = key.indexOf(":");
+  const rows = db.query(
+    "SELECT e.type AS type FROM events e JOIN runs r ON r.id=e.run WHERE e.type IN ('gate.passed','gate.failed') AND r.role='worker' AND r.harness=? AND r.model=? ORDER BY e.id DESC LIMIT 30",
+  ).all(key.slice(0, i), key.slice(i + 1)) as { type: string }[];
+  const rec = { passes: rows.filter((r) => r.type === "gate.passed").length, total: rows.length, at: Date.now() };
+  qualityCache.set(key, rec);
+  return rec;
+}
+
+/** Real track record beats the hand-written number: a pair below a 60% pass rate over >=5 gated runs is one level lower (floor 1). */
+export function effectiveQuality(key: string, base: number): number {
+  const { passes, total } = gateRecord(key);
+  return total >= 5 && passes / total < 0.6 ? Math.max(1, base - 1) : base;
+}
+
 let pickSeq = 0;
 const lastPicked = new Map<string, number>(); // catalog key → seq, for round-robin among equal-cost ties
 
@@ -125,13 +150,13 @@ export function pickWorker(s: store.Settings, t: store.Ticket, running: Run[], a
     if (!enabled(t.harness) || !free(t.harness)) return null;
     return { harness: t.harness, model: t.model !== "default" ? t.model : s.harnesses[t.harness].model };
   }
-  const minQuality = Math.min(5, MIN_QUALITY[t.difficulty ?? "medium"] + (attempt - 1));
+  const minQuality = Math.min(5, (MIN_QUALITY[t.difficulty ?? "medium"] ?? 3) + (attempt - 1));
   const allCaps = new Set(Object.values(s.catalog).flatMap((c) => c.caps ?? []));
   const requiredCaps = t.tags.filter((tag) => allCaps.has(tag));
   const activeCount = (h: Harness) => running.filter((r) => r.role === "worker" && r.harness === h && r.status !== "idle" && r.status !== "paused").length;
   const candidates = Object.entries(s.catalog)
     .map(([key, c]) => ({ key, ...c, harness: key.slice(0, key.indexOf(":")) as Harness, model: key.slice(key.indexOf(":") + 1) }))
-    .filter((c) => enabled(c.harness) && free(c.harness) && c.quality >= minQuality && requiredCaps.every((tag) => (c.caps ?? []).includes(tag)));
+    .filter((c) => enabled(c.harness) && free(c.harness) && effectiveQuality(c.key, c.quality) >= minQuality && requiredCaps.every((tag) => (c.caps ?? []).includes(tag)));
   if (candidates.length) {
     candidates.sort((a, b) => a.cost - b.cost || activeCount(a.harness) - activeCount(b.harness) || (lastPicked.get(a.key) ?? 0) - (lastPicked.get(b.key) ?? 0));
     const pick = candidates[0];
@@ -145,10 +170,10 @@ export function pickWorker(s: store.Settings, t: store.Ticket, running: Run[], a
 export function pickReviewer(s: store.Settings, impl: { harness: Harness; model: string }): { harness: Harness; model: string } {
   if (Object.keys(s.catalog).length) {
     const implEntry = s.catalog[`${impl.harness}:${impl.model}`];
-    const minQuality = Math.max(4, implEntry?.quality ?? 0);
+    const minQuality = Math.max(4, implEntry ? effectiveQuality(`${impl.harness}:${impl.model}`, implEntry.quality) : 0);
     const candidates = Object.entries(s.catalog)
       .map(([key, c]) => ({ key, ...c, harness: key.slice(0, key.indexOf(":")) as Harness, model: key.slice(key.indexOf(":") + 1) }))
-      .filter((c) => s.harnesses[c.harness]?.enabled && c.quality >= minQuality && (!implEntry || c.family !== implEntry.family))
+      .filter((c) => s.harnesses[c.harness]?.enabled && effectiveQuality(c.key, c.quality) >= minQuality && (implEntry ? c.family !== implEntry.family : c.harness !== impl.harness))
       .sort((a, b) => a.cost - b.cost);
     if (candidates.length) return { harness: candidates[0].harness, model: candidates[0].model };
   }
@@ -188,6 +213,7 @@ export function schedule(ws: string) {
 function schedulePass(ws: string) {
   const plan = plans.get(ws);
   if (!plan?.active) return;
+  clearQualityCache(); // fresh track record for this pass, not the previous one's
   const w = mustWs(ws), s = store.loadSettings(w.path);
   const tickets = store.listTickets(w.path);
   const byId = new Map(tickets.map((t) => [t.id, t]));
