@@ -1,5 +1,5 @@
-import { GitMerge, Play, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { GitMerge, Pencil, Play, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { ago, api, LIVE, useApi, type FEvent, type Run, type Ticket, type Workspace } from "./api";
 import { modelOpts, Select, type Opt } from "./select";
 import { Btn, Dot, Empty, HARNESS_COLOR, HarnessTag, inputCls, Md, STATUS_META, StatusChip, StatusIcon, textareaCls } from "./ui";
@@ -21,6 +21,12 @@ export function TicketDrawer({ ws, id, onClose, toast }: { ws: Workspace; id: st
     .catch((e) => toast(e.message + (e.data?.brief_errors ? "\n• " + e.data.brief_errors.join("\n• ") : "")));
   const d = t.data;
   const liveRun = d?.runs?.find((r) => r.role === "worker" && LIVE.includes(r.status));
+  const picked = useRef(false);
+  useEffect(() => {
+    if (!d || picked.current) return;
+    picked.current = true;
+    if ((d.status === "in_review" || d.status === "done") && d.sections.Report) setTab("report");
+  }, [d]);
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/20 backdrop-blur-[1px]" onClick={onClose}>
@@ -60,16 +66,16 @@ export function TicketDrawer({ ws, id, onClose, toast }: { ws: Workspace; id: st
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-5">
-              {tab === "brief" && <BriefEditor ws={ws} t={d} onSaved={t.reload} toast={toast} />}
+              {tab === "brief" && <Brief ws={ws} t={d} onSaved={t.reload} toast={toast} />}
               {tab === "report" && (d.sections.Report ? <Md text={d.sections.Report} /> : <Empty>No report yet. The worker writes it on submit and the gate appends its evidence.</Empty>)}
               {tab === "runs" && <Runs runs={d.runs ?? []} />}
               {tab === "diff" && <Diff ws={ws} id={id} />}
             </div>
 
-            <form className="flex gap-2 border-t border-border px-4 py-3 md:px-6" onSubmit={(e) => { e.preventDefault(); if (tell.trim()) act(api(`/api/ws/${ws.id}/tickets/${id}/tell`, { body: { text: tell } }), "Sent").then(() => setTell("")); }}>
+            {d.status !== "done" && <form className="flex gap-2 border-t border-border px-4 py-3 md:px-6" onSubmit={(e) => { e.preventDefault(); if (tell.trim()) act(api(`/api/ws/${ws.id}/tickets/${id}/tell`, { body: { text: tell } }), "Sent").then(() => setTell("")); }}>
               <input value={tell} onChange={(e) => setTell(e.target.value)} placeholder={liveRun ? "Steer the worker…" : "Resume the worker with guidance…"} aria-label="message worker" className={inputCls} />
               <Btn type="submit" kind="primary" disabled={!tell.trim()}>Send</Btn>
-            </form>
+            </form>}
           </>
         )}
       </aside>
@@ -81,7 +87,41 @@ const L = ({ label, className = "", children }: { label: string; className?: str
   <label className={`block ${className}`}><span className="mb-1 block text-[12px] font-medium text-fg-muted">{label}</span>{children}</label>
 );
 
-function BriefEditor({ ws, t, onSaved, toast }: { ws: Workspace; t: Ticket; onSaved: () => void; toast: (m: string) => void }) {
+const PRIORITY_LABEL: Record<string, string> = { p0: "Urgent", p1: "High", p2: "Medium", p3: "Low" };
+
+function Brief({ ws, t, onSaved, toast }: { ws: Workspace; t: Ticket; onSaved: () => void; toast: (m: string) => void }) {
+  const [editing, setEditing] = useState(t.status === "draft" || t.brief_errors.length > 0);
+  if (editing) return <BriefEditor ws={ws} t={t} toast={toast} onSaved={() => { onSaved(); if (t.status !== "draft") setEditing(false); }} onCancel={t.status === "draft" ? undefined : () => setEditing(false)} />;
+  const hc = ws.settings.harnesses[t.harness === "any" ? ws.settings.default_harness : t.harness];
+  const props: [string, React.ReactNode][] = [
+    ["Priority", PRIORITY_LABEL[t.priority] ?? t.priority],
+    ["Harness", <HarnessTag h={t.harness} />],
+    ["Model", t.model !== "default" ? t.model : <span className="text-fg-muted">{hc?.model ? <>{hc.model} <span className="text-fg-subtle">· settings default</span></> : "Harness default"}</span>],
+    ["Scope", <span className="font-mono text-[12px]">{t.scope_paths.join(", ") || "—"}</span>],
+    ["Tags", t.tags.join(", ") || "—"],
+    ["Depends on", t.depends_on.join(", ") || "—"],
+  ];
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start gap-4">
+        <dl className="grid flex-1 grid-cols-[88px_1fr] gap-x-4 gap-y-2 text-[13px]">
+          {props.map(([k, v]) => <div key={k} className="contents"><dt className="text-fg-subtle">{k}</dt><dd className="min-w-0 truncate">{v}</dd></div>)}
+        </dl>
+        <Btn onClick={() => setEditing(true)}><Pencil className="size-3.5" />Edit</Btn>
+      </div>
+      {EDITABLE.filter((k) => t.sections[k]?.trim()).map((k) => (
+        <section key={k}>
+          <h3 className="mb-1.5 text-[12px] font-medium text-fg-muted">{k}</h3>
+          {k === "Verify"
+            ? <pre className="overflow-x-auto rounded-lg border border-border bg-muted px-3 py-2 font-mono text-[12px] text-fg">{t.sections[k]}</pre>
+            : <Md text={t.sections[k]} />}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function BriefEditor({ ws, t, onSaved, onCancel, toast }: { ws: Workspace; t: Ticket; onSaved: () => void; onCancel?: () => void; toast: (m: string) => void }) {
   const init = () => ({ title: t.title, priority: t.priority, tags: t.tags.join(", "), depends_on: t.depends_on.join(", "), scope_paths: t.scope_paths.join(", "), harness: t.harness, model: t.model, sections: { ...t.sections } });
   const [f, setF] = useState(init);
   const dirty = JSON.stringify(f) !== JSON.stringify(init());
@@ -111,10 +151,10 @@ function BriefEditor({ ws, t, onSaved, toast }: { ws: Workspace; t: Ticket; onSa
             value={f.sections[k] ?? ""} onChange={(e) => setF({ ...f, sections: { ...f.sections, [k]: e.target.value } })} />
         </L>
       ))}
-      {dirty && (
+      {(dirty || onCancel) && (
         <div className="sticky bottom-0 flex justify-end gap-2 bg-surface py-2">
-          <Btn kind="ghost" onClick={() => setF(init())}>Discard</Btn>
-          <Btn kind="primary" onClick={save}>Save changes</Btn>
+          <Btn kind="ghost" onClick={() => { setF(init()); onCancel?.(); }}>{onCancel ? "Cancel" : "Discard"}</Btn>
+          <Btn kind="primary" disabled={!dirty} onClick={save}>Save changes</Btn>
         </div>
       )}
     </div>

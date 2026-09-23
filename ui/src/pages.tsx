@@ -120,6 +120,21 @@ const Row = ({ label, hint, children }: { label: string; hint?: string; children
     <div>{children}</div>
   </div>
 );
+function Stepper({ value, onChange, min = 0, max = 999, label, suffix }: { value: number; onChange: (v: number) => void; min?: number; max?: number; label: string; suffix?: string }) {
+  const set = (v: number) => onChange(Math.min(max, Math.max(min, Number.isFinite(v) ? v : min)));
+  const btn = "grid w-7 place-items-center text-fg-muted transition-colors hover:bg-hover hover:text-fg disabled:opacity-30";
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="inline-flex h-8 overflow-hidden rounded-lg border border-border bg-surface shadow-[var(--shadow)]">
+        <button type="button" aria-label={`decrease ${label}`} className={btn} disabled={value <= min} onClick={() => set(value - 1)}>−</button>
+        <input aria-label={label} inputMode="numeric" value={value} onChange={(e) => set(parseInt(e.target.value.replace(/\D/g, ""), 10))}
+          className="w-10 border-x border-border bg-transparent text-center text-[13px] tabular-nums outline-none" />
+        <button type="button" aria-label={`increase ${label}`} className={btn} disabled={value >= max} onClick={() => set(value + 1)}>+</button>
+      </span>
+      {suffix && <span className="text-[13px] text-fg-muted">{suffix}</span>}
+    </span>
+  );
+}
 const Field = ({ label, children }: { label: string; children: ReactNode }) => (
   <div className="min-w-0"><div className="mb-1 text-[11.5px] text-fg-subtle">{label}</div>{children}</div>
 );
@@ -159,7 +174,6 @@ export function Settings({ ws, toast }: { ws: Workspace; toast: (m: string) => v
   );
   const dirty = JSON.stringify(f) !== JSON.stringify(s.data);
   const save = () => api(`/api/ws/${ws.id}/settings`, { method: "PUT", body: f }).then(() => { s.reload(); toast("Settings saved"); }).catch((e) => toast(e.message));
-  const num = `${inputCls} w-24`;
   const reviewerFirst = f.reviewer_order.find((h: Harness) => h !== f.default_harness && f.harnesses[h]?.enabled);
   const setH = (h: Harness, patch: object) => setF({ ...f, harnesses: { ...f.harnesses, [h]: { ...f.harnesses[h], ...patch } } });
 
@@ -205,7 +219,7 @@ export function Settings({ ws, toast }: { ws: Workspace; toast: (m: string) => v
           </Group>
 
           <Group title="Workers">
-            <Row label="Max workers" hint="Parallel workers across all harnesses."><input type="number" min={1} max={16} className={num} value={f.max_workers} onChange={(e) => setF({ ...f, max_workers: Number(e.target.value) })} /></Row>
+            <Row label="Max workers" hint="Parallel workers across all harnesses."><Stepper label="max workers" min={1} max={16} value={f.max_workers} onChange={(v) => setF({ ...f, max_workers: v })} /></Row>
             <Row label="Reviewer order" hint="The first enabled harness that differs from the implementer reviews its work.">
               <div className="flex flex-wrap gap-1.5">
                 {f.reviewer_order.map((h: Harness, i: number) => (
@@ -219,12 +233,12 @@ export function Settings({ ws, toast }: { ws: Workspace; toast: (m: string) => v
                 {reviewerFirst ? `Work from ${f.default_harness} is reviewed by ${reviewerFirst}, a different model family.` : "Only one harness is enabled, so reviews use a different model on the same harness."}
               </p>
             </Row>
-            <Row label="Max gate attempts" hint="After this many attempts the ticket is marked failed."><input type="number" min={1} max={6} className={num} value={f.max_attempts} onChange={(e) => setF({ ...f, max_attempts: Number(e.target.value) })} /></Row>
-            <Row label="Question timeout" hint="Minutes before an unanswered, reversible question falls back to the worker's default."><input type="number" min={1} className={num} value={f.ask_timeout_min} onChange={(e) => setF({ ...f, ask_timeout_min: Number(e.target.value) })} /></Row>
+            <Row label="Max gate attempts" hint="After this many attempts the ticket is marked failed."><Stepper label="max gate attempts" min={1} max={6} value={f.max_attempts} onChange={(v) => setF({ ...f, max_attempts: v })} /></Row>
+            <Row label="Question timeout" hint="Minutes before an unanswered, reversible question falls back to the worker's default."><Stepper label="question timeout" min={1} max={120} value={f.ask_timeout_min} onChange={(v) => setF({ ...f, ask_timeout_min: v })} suffix="min" /></Row>
             <Row label="Auto mode budget" hint="Limits for /factory:auto. New workers stop starting at 70% of the budget.">
-              <div className="flex items-center gap-2 text-[13px] text-fg-muted">
-                <input type="number" className={num} value={f.auto_budget.hours} onChange={(e) => setF({ ...f, auto_budget: { ...f.auto_budget, hours: Number(e.target.value) } })} aria-label="hours" /> hours
-                <input type="number" className={num} value={f.auto_budget.tickets} onChange={(e) => setF({ ...f, auto_budget: { ...f.auto_budget, tickets: Number(e.target.value) } })} aria-label="tickets" /> tickets
+              <div className="flex flex-wrap items-center gap-4">
+                <Stepper label="auto budget hours" min={1} max={48} value={f.auto_budget.hours} onChange={(v) => setF({ ...f, auto_budget: { ...f.auto_budget, hours: v } })} suffix="hours" />
+                <Stepper label="auto budget tickets" min={1} max={100} value={f.auto_budget.tickets} onChange={(v) => setF({ ...f, auto_budget: { ...f.auto_budget, tickets: v } })} suffix="tickets" />
               </div>
             </Row>
           </Group>

@@ -90,7 +90,7 @@ function App() {
               <p className="mt-1 text-[13px] text-fg-muted">{wss.error ? <>Start it with <code className="font-mono">factory up</code></> : <>Open Claude Code in a repo and run <code className="font-mono">/factory:init</code></>}</p>
             </div>
           </div>
-        ) : route.view === "floor" ? <Floor key={ws.id} ws={ws} openTicket={openTicket} toast={setToast} />
+        ) : route.view === "floor" ? <Floor key={ws.id} ws={ws} openTicket={openTicket} openBoard={() => go({ view: "board", ticket: null })} toast={setToast} />
           : route.view === "board" ? <Board key={ws.id} ws={ws} openTicket={openTicket} toast={setToast} />
           : route.view === "issues" ? <Issues key={ws.id} ws={ws} openTicket={openTicket} toast={setToast} />
           : route.view === "rules" ? <Rules key={ws.id} ws={ws} toast={setToast} />

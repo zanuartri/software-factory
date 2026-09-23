@@ -2,7 +2,7 @@ import { ArrowUp, Pause, Play, Skull, Square, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ago, api, LIVE, useApi, useLive, type Ask, type FEvent, type Run, type Ticket, type Workspace } from "./api";
 import { Checkbox } from "./select";
-import { Badge, Btn, Dot, HarnessTag, inputCls, PageHeader, StatusChip, StatusIcon, useTick } from "./ui";
+import { Badge, Btn, Dot, HarnessTag, inputCls, PageHeader, STATUS_META, StatusChip, StatusIcon, useTick } from "./ui";
 
 const PHASES = ["plan", "implement", "test", "review", "gate"] as const;
 const phaseIdx = (p: string | null) => ({ plan: 0, implement: 1, fix: 1, test: 2, review: 3, "wrap-up": 3, gate: 4 } as Record<string, number>)[p ?? "plan"] ?? 0;
@@ -43,7 +43,7 @@ export function describe(e: FEvent): { text: string; tone: Tone } {
 }
 const TONE: Record<Tone, string> = { success: "var(--success)", danger: "var(--danger)", warning: "var(--warning)", accent: "var(--accent)", muted: "var(--fg-muted)", subtle: "var(--border-strong)" };
 
-export function Floor({ ws, openTicket, toast }: { ws: Workspace; openTicket: (id: string) => void; toast: (m: string) => void }) {
+export function Floor({ ws, openTicket, openBoard, toast }: { ws: Workspace; openTicket: (id: string) => void; openBoard: () => void; toast: (m: string) => void }) {
   const mine = (e: FEvent) => e.ws === ws.id;
   const runs = useApi<Run[]>(`/api/ws/${ws.id}/runs`, (e) => mine(e) && /^(run|gate|review|ticket|plan|merge)\./.test(e.type) && e.type !== "run.text");
   const tickets = useApi<Ticket[]>(`/api/ws/${ws.id}/tickets`, (e) => mine(e) && /ticket|store|gate|merge/.test(e.type));
@@ -77,15 +77,14 @@ export function Floor({ ws, openTicket, toast }: { ws: Workspace; openTicket: (i
 
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-[1fr_360px] xl:overflow-hidden">
         <div className="space-y-6 px-4 py-4 md:space-y-8 md:px-6 md:py-6 xl:min-h-0 xl:overflow-y-auto">
-          {/* stats */}
-          <div className="card grid grid-cols-5 gap-px overflow-hidden bg-border">
-            {(["draft", "open", "in_progress", "in_review", "done"] as const).map((s) => (
-              <div key={s} className="min-w-0 bg-surface px-3 py-2.5 md:px-4 md:py-3">
-                <div className="flex min-w-0 items-center gap-1.5 truncate text-[11.5px] whitespace-nowrap text-fg-muted md:text-[12px]"><StatusIcon status={s} size={12} />{{ draft: "Draft", open: "Open", in_progress: "In progress", in_review: "In review", done: "Done" }[s]}</div>
-                <div className="mt-0.5 text-xl font-semibold tracking-tight tabular-nums md:text-2xl">{count(s)}</div>
-              </div>
+          <button onClick={openBoard} title="Open board" className="-mx-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg px-1.5 py-1 text-[13px] text-fg-muted transition-colors hover:bg-hover">
+            {(["draft", "open", "in_progress", "in_review", "done"] as const).filter((s) => count(s) > 0).map((s) => (
+              <span key={s} className="inline-flex items-center gap-1.5">
+                <StatusIcon status={s} size={12} /><span className="font-medium text-fg tabular-nums">{count(s)}</span>{STATUS_META[s].label.toLowerCase()}
+              </span>
             ))}
-          </div>
+            {!(tickets.data ?? []).length && <span>No tickets yet — plan some with /factory:plan</span>}
+          </button>
 
           {/* workers */}
           <section>
@@ -111,7 +110,7 @@ export function Floor({ ws, openTicket, toast }: { ws: Workspace; openTicket: (i
                     <StatusIcon status={t.status} />
                     <span className="w-12 font-mono text-[12px] text-fg-subtle">{t.id}</span>
                     <span className="min-w-0 flex-1 truncate text-[13px]">{t.title}</span>
-                    <span className="max-w-[40%] truncate text-[12px] text-fg-subtle">{t.blocked ?? t.failed ?? "Ready for review"}</span>
+                    {(t.blocked || t.failed) && <span className="hidden max-w-[40%] truncate text-[12px] text-fg-subtle md:inline">{t.blocked ?? t.failed}</span>}
                     {t.blocked || t.failed ? <StatusChip t={t} /> : <Badge tone="accent">Review</Badge>}
                   </button>
                 ))}
@@ -122,11 +121,12 @@ export function Floor({ ws, openTicket, toast }: { ws: Workspace; openTicket: (i
 
         {/* right column */}
         <aside className="flex flex-col border-t xl:min-h-0 border-border bg-bg xl:border-t-0 xl:border-l">
-          <section className="border-b border-border p-4 xl:max-h-[50%] xl:min-h-0 xl:overflow-y-auto">
-            <h2 className="mb-3 flex items-center gap-2 text-[13px] font-medium">Questions {pending.length > 0 && <Badge tone="warning">{pending.length}</Badge>}</h2>
-            {pending.length === 0 ? <p className="text-[13px] text-fg-subtle">No worker is waiting on an answer.</p>
-              : <div className="space-y-3">{pending.map((a) => <AskCard key={a.id} a={a} toast={toast} />)}</div>}
-          </section>
+          {pending.length > 0 && (
+            <section className="border-b border-border p-4 xl:max-h-[50%] xl:min-h-0 xl:overflow-y-auto">
+              <h2 className="mb-3 flex items-center gap-2 text-[13px] font-medium">Questions <Badge tone="warning">{pending.length}</Badge></h2>
+              <div className="space-y-3">{pending.map((a) => <AskCard key={a.id} a={a} toast={toast} />)}</div>
+            </section>
+          )}
           <section className="flex min-h-0 flex-1 flex-col">
             <div className="flex items-center px-4 pt-4 pb-2">
               <h2 className="text-[13px] font-medium">Activity</h2>

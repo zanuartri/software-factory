@@ -85,7 +85,7 @@ export function Board({ ws, openTicket, toast }: { ws: Workspace; openTicket: (i
                     {c === "draft" && t.brief_errors.length > 0 && <p className="mt-2 text-[11px] text-fg-subtle">{t.brief_errors.length} brief gap{t.brief_errors.length > 1 ? "s" : ""}</p>}
                   </article>
                 ))}
-                {!list.length && <p className="px-2 py-6 text-center text-[12px] text-fg-subtle">No tickets</p>}
+                {!list.length && <div className="h-16 rounded-lg border border-dashed border-border" aria-hidden />}
               </div>
             </section>
           );
@@ -133,7 +133,6 @@ function ListView({ tickets, over, dropProps, openTicket }: { tickets: Ticket[];
                 <HarnessTag h={t.harness} />
               </div>
             ))}
-            {!closed && !list.length && <p className="border-b border-border px-4 py-3 text-[12px] text-fg-subtle md:px-6">No tickets</p>}
           </section>
         );
       })}
