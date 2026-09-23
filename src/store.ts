@@ -65,10 +65,11 @@ export function loadSettings(repo: string): Settings {
 export const saveSettings = (repo: string, s: Settings) => writeFileSync(dir(repo, "settings.json"), JSON.stringify(s, null, 2) + "\n");
 
 /** PowerShell 5.1 strips embedded double quotes, so `["claude"]` arrives as `[claude]` and JSON.parse fails.
- *  When the current value at this key is an array, fall back to a comma list (with or without brackets)
- *  instead of saving the raw string. */
-function coerceValue(raw: string, currentVal: unknown): unknown {
-  if (Array.isArray(currentVal)) {
+ *  When the current value (or the default at this key) is an array, fall back to a comma list (with or
+ *  without brackets) instead of saving the raw string — `defaultVal` also heals an array setting that a
+ *  pre-fix CLI corrupted into a string. */
+function coerceValue(raw: string, currentVal: unknown, defaultVal?: unknown): unknown {
+  if (Array.isArray(currentVal) || Array.isArray(defaultVal)) {
     try { const j = JSON.parse(raw); if (Array.isArray(j)) return j; } catch {}
     let s = raw.trim();
     if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1).trim();
@@ -88,17 +89,19 @@ export function settingsPatch(current: Settings, args: string[]): Partial<Settin
   for (const a of args) {
     const eq = a.indexOf("=");
     if (eq < 0) throw new Error(`invalid pair (missing '='): ${a}`);
-    const key = a.slice(0, eq);
-    if (!key) throw new Error(`invalid pair (empty key): ${a}`);
-    const parts = key.split(".");
+    const parts = a.slice(0, eq).split(".");
+    if (parts.some((p) => !p.trim())) throw new Error(`invalid pair (empty key): ${a}`);
+    const rawVal = a.slice(eq + 1);
+    if (!rawVal.trim()) throw new Error(`invalid pair (empty value): ${a}`);
     touched.add(parts[0]);
-    let obj = next;
+    let obj = next, def: any = DEFAULT_SETTINGS;
     for (let i = 0; i < parts.length - 1; i++) {
       if (typeof obj[parts[i]] !== "object" || obj[parts[i]] == null) obj[parts[i]] = {};
       obj = obj[parts[i]];
+      def = def?.[parts[i]];
     }
     const leaf = parts.at(-1)!;
-    obj[leaf] = coerceValue(a.slice(eq + 1), obj[leaf]);
+    obj[leaf] = coerceValue(rawVal, obj[leaf], def?.[leaf]);
   }
   return Object.fromEntries([...touched].map((k) => [k, next[k]]));
 }

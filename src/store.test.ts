@@ -59,3 +59,18 @@ test("settingsPatch: pair without '=' throws naming the bad arg", () => {
 test("settingsPatch: empty key throws naming the bad arg", () => {
   expect(() => settingsPatch(DEFAULT_SETTINGS, ["=5"])).toThrow(/=5/);
 });
+
+test("settingsPatch: blank key or empty dotted segment throws", () => {
+  for (const a of [" =5", "=5", "a..b=1", "a.=1", ".a=1", ".=1"])
+    expect(() => settingsPatch(DEFAULT_SETTINGS, [a])).toThrow(/invalid pair \(empty key\)/);
+});
+
+test("settingsPatch: empty value throws naming the bad arg", () => {
+  expect(() => settingsPatch(DEFAULT_SETTINGS, ["max_workers="])).toThrow(/invalid pair \(empty value\): max_workers=/);
+  expect(() => settingsPatch(DEFAULT_SETTINGS, ["max_workers=  "])).toThrow(/invalid pair \(empty value\)/);
+});
+
+test("settingsPatch: array setting corrupted into a string heals via the default type", () => {
+  const cur = { ...DEFAULT_SETTINGS, reviewer_order: "[claude]" as any };
+  expect(settingsPatch(cur, ["reviewer_order=[claude,pi]"]).reviewer_order).toEqual(["claude", "pi"]);
+});
