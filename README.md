@@ -10,11 +10,14 @@ Design and rationale: [DESIGN.md](DESIGN.md).
 
 ## Install
 
-```bash
-bun install && (cd ui && bun install && bun run build)
-bun link                      # puts `factory` on PATH
-factory setup                 # env-gated guards for commandcode + opencode (no-op outside factory runs)
-claude plugin marketplace add .
+One command per line (works in PowerShell and bash):
+
+```
+bun install
+cd ui; bun install; bun run build; cd ..
+bun link                                        # puts `factory` on PATH (open a new terminal after)
+factory setup                                   # env-gated guards for commandcode + opencode (no-op outside factory runs)
+claude plugin marketplace add ./
 claude plugin install factory@software-factory
 factory doctor
 ```

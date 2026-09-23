@@ -42,15 +42,19 @@ async function api(method: string, path: string, body?: unknown, raw = false) {
   return data;
 }
 
-async function currentWs(): Promise<{ id: string; path: string }> {
+/** The workspace for cwd, or null (callers that need one use currentWs, which exits with a hint). */
+async function findWs(): Promise<{ id: string; path: string } | null> {
   if (typeof flags.ws === "string") return { id: flags.ws, path: "" };
-  const root = repoRoot(process.cwd()) ?? die("not inside a git repo (or pass --ws <id>)");
+  const root = repoRoot(process.cwd());
+  if (!root) return null;
   const all = (await api("GET", "/api/workspaces")) as any[];
   const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase();
-  const hit = all.find((w) => norm(w.path) === norm(root));
   // worktrees live under ~/.factory/worktrees/<ws>/<ticket>
   const viaWt = norm(root).match(/\/worktrees\/([^/]+)\/t-\d+$/)?.[1];
-  return hit ?? all.find((w) => w.id === viaWt) ?? die(`${root} is not a factory workspace — run \`factory init\``);
+  return all.find((w) => norm(w.path) === norm(root)) ?? all.find((w) => w.id === viaWt) ?? null;
+}
+async function currentWs(): Promise<{ id: string; path: string }> {
+  return (await findWs()) ?? die(repoRoot(process.cwd()) ? "this repo is not a factory workspace — run `factory init` (or /factory:init)" : "not inside a git repo (or pass --ws <id>)");
 }
 const kv = (pairs: string[]) => Object.fromEntries(pairs.map((p) => {
   const [k, ...v] = p.split("="); const val = v.join("=");
@@ -188,7 +192,7 @@ switch (cmd) {
   case "merge": { const w = await currentWs(); const r = await api("POST", `/api/ws/${w.id}/tickets/${sub}/merge`); out(`${sub}: ${r.status}${r.sha ? " " + r.sha.slice(0, 8) : ""}${r.files ? " conflicts: " + r.files.join(", ") : ""}`, r); break; }
   case "gc": { const w = await currentWs(); const a = await api("POST", `/api/ws/${w.id}/gc`, { dry: !flags.apply }); out((a.map((x: any) => `${flags.apply ? "removed" : "would remove"} ${x.kind} ${x.target} — ${x.why}`).join("\n") || "nothing to clean") + (flags.apply || !a.length ? "" : "\n(dry run — pass --apply)"), a); break; }
   case "doctor": {
-    const ws = typeof flags.ws === "string" ? flags.ws : await currentWs().then((w) => w.id).catch(() => undefined);
+    const ws = (await findWs())?.id; // doctor works anywhere; outside a workspace it checks all of them
     const c = await api("GET", `/api/doctor${ws ? `?ws=${ws}` : ""}`);
     out(c.map((x: any) => `${x.ok ? "✔" : "✖"} ${x.name}${x.detail ? `  — ${x.detail}` : ""}`).join("\n"), c);
     break;
