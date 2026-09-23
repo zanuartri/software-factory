@@ -16,7 +16,7 @@ const CLAUDE: Model[] = [
 
 async function run(h: Harness, args: string[]) {
   if (!Bun.which(h)) return "";
-  const p = Bun.spawn([...bin(h), ...args], { stdout: "pipe", stderr: "ignore" });
+  const p = Bun.spawn([...bin(h), ...args], { stdout: "pipe", stderr: "ignore", windowsHide: true });
   const t = setTimeout(() => p.kill(), 60e3);
   const out = await new Response(p.stdout).text();
   clearTimeout(t);

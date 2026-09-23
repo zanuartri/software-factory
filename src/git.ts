@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { HOME } from "./db";
 
 export function git(cwd: string, ...args: string[]) {
-  const p = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe", windowsHide: true });
   return { ok: p.exitCode === 0, out: p.stdout.toString().trim(), err: p.stderr.toString().trim() };
 }
 const must = (cwd: string, ...args: string[]) => {
@@ -48,7 +48,7 @@ export function squashMerge(repo: string, branch: string, base: string, message:
   const oldSha = head(repo, base);
   if (!git(repo, "merge-base", "--is-ancestor", oldSha, branch).ok) throw new Error(`${branch} is not rebased on ${base}`);
   const tree = head(repo, `${branch}^{tree}`);
-  const sha = Bun.spawnSync(["git", "commit-tree", tree, "-p", oldSha, "-F", "-"], { cwd: repo, stdin: Buffer.from(message) }).stdout.toString().trim();
+  const sha = Bun.spawnSync(["git", "commit-tree", tree, "-p", oldSha, "-F", "-"], { cwd: repo, stdin: Buffer.from(message), windowsHide: true }).stdout.toString().trim();
   if (!sha) throw new Error("commit-tree failed");
   advanceBase(repo, base, sha, oldSha);
   return sha;
