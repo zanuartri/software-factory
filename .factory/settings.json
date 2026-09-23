@@ -1,0 +1,67 @@
+{
+  "base_branch": "main",
+  "harnesses": {
+    "claude": {
+      "enabled": true,
+      "model": "sonnet",
+      "models": [
+        "sonnet",
+        "opus",
+        "haiku"
+      ]
+    },
+    "pi": {
+      "enabled": true,
+      "model": "",
+      "models": []
+    },
+    "opencode": {
+      "enabled": true,
+      "model": "",
+      "models": []
+    },
+    "commandcode": {
+      "enabled": true,
+      "model": "",
+      "models": []
+    }
+  },
+  "default_harness": "claude",
+  "max_workers": 3,
+  "reviewer_order": [
+    "pi",
+    "opencode",
+    "commandcode",
+    "claude"
+  ],
+  "reviewer_models": {
+    "claude": "opus",
+    "pi": "",
+    "opencode": "",
+    "commandcode": ""
+  },
+  "verify_cmd": "bun test src && bunx tsc -p . && cd ui && bunx tsc -p . --noEmit && bun run build",
+  "allowed_tools": [
+    "Bash(git:*)",
+    "Bash(bun:*)",
+    "Bash(bunx:*)",
+    "Bash(ls:*)",
+    "Bash(cat:*)",
+    "Bash(rg:*)",
+    "Bash(grep:*)",
+    "Bash(find:*)",
+    "Bash(mkdir:*)",
+    "Bash(mktemp:*)",
+    "Bash(curl:*)",
+    "Bash(kill:*)",
+    "Bash(cd:*)"
+  ],
+  "merge_via": "local",
+  "auto_merge": true,
+  "auto_budget": {
+    "hours": 4,
+    "tickets": 10
+  },
+  "ask_timeout_min": 20,
+  "max_attempts": 3
+}
