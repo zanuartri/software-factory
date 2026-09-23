@@ -28,7 +28,7 @@ async function up() {
   if (await alive()) return;
   mkdirSync(HOME, { recursive: true });
   const log = openSync(join(HOME, "daemon.log"), "a");
-  const p = Bun.spawn(["bun", join(ROOT, "src", "daemon.ts")], { stdio: ["ignore", log, log], detached: true, cwd: ROOT, windowsHide: true });
+  const p = Bun.spawn(["bun", join(ROOT, "src", "daemon.ts")], { stdio: ["ignore", log, log], detached: true, cwd: ROOT });
   p.unref();
   for (let i = 0; i < 40; i++) { if (await alive()) return; await Bun.sleep(250); }
   die(`daemon did not start; see ${join(HOME, "daemon.log")}`);
@@ -93,7 +93,7 @@ switch (cmd) {
     if (h) {
       await fetch(`${BASE_URL}/api/shutdown`, { method: "POST" }).catch(() => {}); // kills worker trees first
       await Bun.sleep(600);
-      if (process.platform === "win32") Bun.spawnSync(["taskkill", "/T", "/F", "/PID", String(h.pid)], { stdout: "ignore", stderr: "ignore", windowsHide: true });
+      if (process.platform === "win32") Bun.spawnSync(["taskkill", "/T", "/F", "/PID", String(h.pid)], { stdout: "ignore", stderr: "ignore" });
       else try { process.kill(h.pid); } catch {}
     }
     out(h ? "stopped (workers stopped too; `factory tell <ticket>` resumes them)" : "not running");

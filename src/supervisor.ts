@@ -73,7 +73,7 @@ function pendingMessages(runId: string) {
 }
 
 async function sh(cmd: string, cwd: string, timeoutMs = 15 * 60e3) {
-  const p = Bun.spawn(["bash", "-c", cmd], { cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, CI: "1" }, windowsHide: true });
+  const p = Bun.spawn(["bash", "-c", cmd], { cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, CI: "1" } });
   const timer = setTimeout(() => killTree(p.pid), timeoutMs);
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
   clearTimeout(timer);
@@ -550,8 +550,8 @@ async function doMerge(ws: string, ticketId: string) {
   if (s.merge_via === "pr") {
     const push = git.git(wt, "push", "-u", "origin", t.branch);
     if (!push.ok) throw new Error(`push failed: ${push.err}`);
-    const pr = Bun.spawnSync(["gh", "pr", "create", "--base", s.base_branch, "--head", t.branch, "--title", msg.split("\n")[0], "--body", msg], { cwd: wt, windowsHide: true });
-    const merged = Bun.spawnSync(["gh", "pr", "merge", t.branch, "--squash", "--delete-branch"], { cwd: wt, windowsHide: true });
+    const pr = Bun.spawnSync(["gh", "pr", "create", "--base", s.base_branch, "--head", t.branch, "--title", msg.split("\n")[0], "--body", msg], { cwd: wt });
+    const merged = Bun.spawnSync(["gh", "pr", "merge", t.branch, "--squash", "--delete-branch"], { cwd: wt });
     if (merged.exitCode !== 0) throw new Error(`gh pr merge failed: ${merged.stderr.toString()} ${pr.stderr.toString()}`);
     git.git(w.path, "fetch", "origin", git.currentBranch(w.path) === s.base_branch ? s.base_branch : `${s.base_branch}:${s.base_branch}`);
     if (git.currentBranch(w.path) === s.base_branch) git.git(w.path, "merge", "--ff-only", `origin/${s.base_branch}`);

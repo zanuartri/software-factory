@@ -28,7 +28,7 @@ export type Adapter = { caps: Caps; start(o: StartOpts): Promise<Handle> };
 
 export function killTree(pid: number | null | undefined) {
   if (!pid) return;
-  if (process.platform === "win32") Bun.spawnSync(["taskkill", "/T", "/F", "/PID", String(pid)], { stdout: "ignore", stderr: "ignore", windowsHide: true });
+  if (process.platform === "win32") Bun.spawnSync(["taskkill", "/T", "/F", "/PID", String(pid)], { stdout: "ignore", stderr: "ignore" });
   else try { process.kill(-pid, "SIGKILL"); } catch { try { process.kill(pid, "SIGKILL"); } catch {} }
 }
 
@@ -80,7 +80,7 @@ const claude: Adapter = {
       "--mcp-config", mcp, "--settings", settings, "--permission-mode", o.role === "reviewer" ? "default" : "acceptEdits"];
     if (o.model) args.push("--model", o.model);
     if (o.resumeSession) args.push("--resume", o.resumeSession);
-    const p = Bun.spawn(args, { cwd: o.cwd, env: baseEnv(o), stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true });
+    const p = Bun.spawn(args, { cwd: o.cwd, env: baseEnv(o), stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     const log = transcript(o);
     const write = (obj: any) => { p.stdin.write(JSON.stringify(obj) + "\n"); p.stdin.flush(); };
     const user = (text: string) => write({ type: "user", message: { role: "user", content: text } });
@@ -116,7 +116,7 @@ const pi: Adapter = {
     if (o.model) args.push("--model", o.model);
     if (o.resumeSession) args.push("--continue");
     if (o.role === "reviewer") args.push("--tools", "read,grep,find,ls,factory_report,factory_decision,factory_verdict,factory_ask");
-    const p = Bun.spawn(args, { cwd: o.cwd, env: baseEnv(o), stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true });
+    const p = Bun.spawn(args, { cwd: o.cwd, env: baseEnv(o), stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     const log = transcript(o);
     const write = (obj: any) => { p.stdin.write(JSON.stringify(obj) + "\n"); p.stdin.flush(); };
     let running = false;
@@ -156,7 +156,7 @@ const opencode: Adapter = {
       permission: { edit: o.role === "reviewer" ? "deny" : "allow", bash: o.role === "reviewer" ? "deny" : "allow", webfetch: "deny", external_directory: "deny", doom_loop: "deny" },
     };
     const p = Bun.spawn([...bin("opencode"), "serve", "--port", "0", "--hostname", "127.0.0.1"], {
-      cwd: o.cwd, env: { ...baseEnv(o), OPENCODE_CONFIG_CONTENT: JSON.stringify(config) }, stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true,
+      cwd: o.cwd, env: { ...baseEnv(o), OPENCODE_CONFIG_CONTENT: JSON.stringify(config) }, stdin: "ignore", stdout: "pipe", stderr: "pipe",
     });
     const log = transcript(o);
     const url = await new Promise<string>((res, rej) => {
@@ -210,8 +210,8 @@ const commandcode: Adapter = {
   caps: { liveSteer: false, abort: true, resume: true },
   async start(o) {
     // async: spawnSync here would freeze the whole daemon for several seconds
-    await Bun.spawn([...bin("commandcode"), "mcp", "remove", "factory"], { cwd: o.cwd, stdout: "ignore", stderr: "ignore", windowsHide: true }).exited;
-    await Bun.spawn([...bin("commandcode"), "mcp", "add", "--transport", "http", "--scope", "local", "factory", o.mcpUrl], { cwd: o.cwd, stdout: "ignore", stderr: "ignore", windowsHide: true }).exited;
+    await Bun.spawn([...bin("commandcode"), "mcp", "remove", "factory"], { cwd: o.cwd, stdout: "ignore", stderr: "ignore" }).exited;
+    await Bun.spawn([...bin("commandcode"), "mcp", "add", "--transport", "http", "--scope", "local", "factory", o.mcpUrl], { cwd: o.cwd, stdout: "ignore", stderr: "ignore" }).exited;
     let sid = o.resumeSession ?? null;
     let proc: ReturnType<typeof Bun.spawn> | null = null;
     const log = transcript(o);
@@ -220,7 +220,7 @@ const commandcode: Adapter = {
       if (o.role === "worker") args.push("--yolo"); // guard = PreToolUse hook (installed by `factory setup`) + daemon post-check
       if (o.model) args.push("-m", o.model);
       if (sid) args.push("--resume", sid);
-      const p = Bun.spawn(args, { cwd: o.cwd, env: baseEnv(o), stdin: new Blob([text]), stdout: "pipe", stderr: "pipe", windowsHide: true });
+      const p = Bun.spawn(args, { cwd: o.cwd, env: baseEnv(o), stdin: new Blob([text]), stdout: "pipe", stderr: "pipe" });
       proc = p;
       lines(p.stdout, (l) => {
         log(l);
