@@ -1,0 +1,6 @@
+{
+  "name": "factory",
+  "version": "0.1.0",
+  "description": "Software factory: a coordinator session drives headless claude / pi / opencode / commandcode workers through tickets, worktrees, an independent verify + cross-family review gate, and auto-merge.",
+  "author": { "name": "zen" }
+}

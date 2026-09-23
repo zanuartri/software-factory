@@ -1,0 +1,19 @@
+{
+  "name": "software-factory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "factory": "src/cli.ts"
+  },
+  "scripts": {
+    "daemon": "bun src/daemon.ts",
+    "dev:ui": "cd ui && bun run dev",
+    "build": "cd ui && bun run build",
+    "test": "bun test src"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  }
+}

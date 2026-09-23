@@ -1,0 +1,16 @@
+{
+  "name": "software-factory",
+  "owner": {
+    "name": "zen"
+  },
+  "plugins": [
+    {
+      "name": "factory",
+      "source": "./plugin",
+      "description": "Coordinator + headless workers software factory"
+    }
+  ],
+  "metadata": {
+    "description": "Software factory: coordinator + headless workers with an independent verify and cross-family review gate"
+  }
+}

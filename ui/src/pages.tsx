@@ -1,0 +1,256 @@
+import { ArrowLeft, Plus } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { api, useApi, type FEvent, type Harness, type Issue, type Models, type Workspace } from "./api";
+import { modelOpts, MultiSelect, Select } from "./select";
+import { Badge, Btn, HARNESS_COLOR, inputCls, Md, PageHeader, textareaCls } from "./ui";
+
+const ISSUE_TONE: Record<string, "warning" | "accent" | "neutral" | "success"> = { open: "warning", triaged: "accent", ticketed: "accent", stale: "neutral", closed: "success" };
+
+export function Issues({ ws, openTicket, toast }: { ws: Workspace; openTicket: (id: string) => void; toast: (m: string) => void }) {
+  const issues = useApi<Issue[]>(`/api/ws/${ws.id}/issues`, (e: FEvent) => e.ws === ws.id && /issue|store/.test(e.type));
+  const [filter, setFilter] = useState("all");
+  const [sel, setSel] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState({ title: "", body: "", kind: "bug" });
+  const list = (issues.data ?? []).filter((i) => filter === "all" || i.status === filter);
+  const cur = issues.data?.find((i) => i.id === sel);
+  const create = () => api(`/api/ws/${ws.id}/issues`, { body: draft }).then((i: Issue) => { setDraft({ title: "", body: "", kind: "bug" }); setCreating(false); setSel(i.id); }).catch((e) => toast(e.message));
+  const setStatus = (status: string) => cur && api(`/api/ws/${ws.id}/issues/${cur.id}`, { method: "PATCH", body: { status } }).catch((e) => toast(e.message));
+
+  return (
+    <>
+      <PageHeader title="Issues" sub={`${issues.data?.length ?? 0} total`}>
+        <Btn kind="primary" onClick={() => { setCreating(true); setSel(null); }}><Plus className="size-3.5" />New<span className="hidden md:inline"> issue</span></Btn>
+      </PageHeader>
+      <div className="flex gap-1 overflow-x-auto border-b border-border px-4 py-2 md:px-6">
+        {["all", "open", "triaged", "ticketed", "stale", "closed"].map((f) => (
+          <button key={f} onClick={() => setFilter(f)} className={`h-7 rounded-md px-2.5 text-[12.5px] capitalize transition-colors ${filter === f ? "bg-muted font-medium text-fg" : "text-fg-muted hover:text-fg"}`}>{f}</button>
+        ))}
+      </div>
+      <div className="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[1fr_minmax(380px,44%)]">
+        <ul className={`min-h-0 divide-y divide-border overflow-y-auto ${cur || creating ? "hidden lg:block" : ""}`}>
+          {list.map((i) => (
+            <li key={i.id}>
+              <button onClick={() => { setSel(i.id); setCreating(false); }} className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors md:px-6 ${sel === i.id ? "bg-muted" : "hover:bg-hover"}`}>
+                <span className="w-12 font-mono text-[12px] text-fg-subtle">{i.id}</span>
+                <span className="min-w-0 flex-1 truncate text-[13px]">{i.title}</span>
+                {i.tickets.length > 0 && <span className="font-mono text-[11px] text-fg-subtle">{i.tickets.join(", ")}</span>}
+                <span className="hidden w-16 text-[12px] text-fg-subtle capitalize md:inline">{i.kind}</span>
+                <Badge tone={ISSUE_TONE[i.status]}>{i.status}</Badge>
+              </button>
+            </li>
+          ))}
+          {!list.length && <li className="py-12 text-center text-[13px] text-fg-subtle">No issues</li>}
+        </ul>
+
+        <aside className={`min-h-0 overflow-y-auto border-border p-4 md:p-6 lg:block lg:border-l ${cur || creating ? "" : "hidden"}`}>
+          {(cur || creating) && (
+            <button onClick={() => { setSel(null); setCreating(false); }} className="mb-4 inline-flex items-center gap-1.5 text-[12.5px] text-fg-muted hover:text-fg lg:hidden">
+              <ArrowLeft className="size-3.5" />All issues
+            </button>
+          )}
+          {creating ? (
+            <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (draft.title.trim()) create(); }}>
+              <h2 className="text-[15px] font-semibold">New issue</h2>
+              <input autoFocus className={inputCls} placeholder="Title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} aria-label="issue title" />
+              <div className="flex gap-1">
+                {["bug", "feature", "chore"].map((k) => (
+                  <button type="button" key={k} onClick={() => setDraft({ ...draft, kind: k })} className={`h-7 rounded-md border px-2.5 text-[12.5px] capitalize ${draft.kind === k ? "border-fg text-fg" : "border-border text-fg-muted"}`}>{k}</button>
+                ))}
+              </div>
+              <textarea className={textareaCls} rows={8} placeholder="Symptoms, steps to reproduce, expected vs actual…" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} aria-label="issue body" />
+              <div className="flex justify-end gap-2"><Btn kind="ghost" onClick={() => setCreating(false)}>Cancel</Btn><Btn type="submit" kind="primary">Create issue</Btn></div>
+            </form>
+          ) : cur ? (
+            <div className="fade-up">
+              <div className="flex items-center gap-2 text-[12px] text-fg-subtle"><span className="font-mono">{cur.id}</span><span className="capitalize">· {cur.kind}</span></div>
+              <h2 className="mt-1 text-lg font-semibold tracking-tight">{cur.title}</h2>
+              <div className="mt-3 inline-flex rounded-lg border border-border p-0.5">
+                {["open", "triaged", "stale", "closed"].map((s) => (
+                  <button key={s} onClick={() => setStatus(s)} className={`h-7 rounded-md px-2.5 text-[12.5px] capitalize ${cur.status === s ? "bg-muted font-medium text-fg" : "text-fg-muted hover:text-fg"}`}>{s}</button>
+                ))}
+              </div>
+              {cur.reason && <p className="mt-3 text-[12.5px] text-fg-muted">Reason: {cur.reason}</p>}
+              <Md text={cur.body || "_No description._"} className="mt-4" />
+              {cur.tickets.length > 0 && (
+                <div className="mt-5">
+                  <h3 className="mb-2 text-[12px] font-medium text-fg-muted">Tickets</h3>
+                  <div className="flex gap-2">{cur.tickets.map((t) => <Btn key={t} onClick={() => openTicket(t)}>{t}</Btn>)}</div>
+                </div>
+              )}
+              <p className="mt-6 rounded-lg bg-muted px-3 py-2 text-[12px] text-fg-muted">
+                Triage and ticketing happen in the coordinator: <code className="font-mono">/factory:issue</code>, <code className="font-mono">/factory:plan --issue {cur.id}</code> or <code className="font-mono">/factory:auto</code>.
+              </p>
+            </div>
+          ) : <p className="pt-10 text-center text-[13px] text-fg-subtle">Select an issue</p>}
+        </aside>
+      </div>
+    </>
+  );
+}
+
+export function Rules({ ws, toast }: { ws: Workspace; toast: (m: string) => void }) {
+  const rules = useApi<string>(`/api/ws/${ws.id}/rules`, (e: FEvent) => e.ws === ws.id && e.type === "rules.changed", true);
+  const [text, setText] = useState("");
+  useEffect(() => { if (rules.data != null) setText(rules.data); }, [rules.data]);
+  const lines = text.split("\n").filter((l) => /^\s*\d+\./.test(l)).length;
+  return (
+    <>
+      <PageHeader title="Rules" sub={`${lines} standing orders · .factory/rules.md`}>
+        <Btn kind="primary" disabled={text === rules.data} onClick={() => api(`/api/ws/${ws.id}/rules`, { method: "PUT", body: text }).then(() => { rules.reload(); toast("Rules saved"); }).catch((e) => toast(e.message))}>Save</Btn>
+      </PageHeader>
+      <div className="grid min-h-0 flex-1 grid-rows-[1fr_auto] gap-4 overflow-hidden p-4 md:p-6 lg:grid-cols-[1fr_300px] lg:grid-rows-1 lg:gap-6">
+        <textarea value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} aria-label="rules.md"
+          className={`${textareaCls} min-h-0 resize-none p-4 font-mono text-[13px] leading-7`} />
+        <aside className="space-y-2 text-[12.5px] leading-relaxed text-fg-muted lg:space-y-3 lg:text-[13px]">
+          <p>Standing orders are pasted <strong className="text-fg">verbatim</strong> into every worker and reviewer prompt. Write one numbered constraint per line.</p>
+          <p>If you've told workers the same thing twice, it belongs here. <code className="font-mono text-[12px]">/factory:reflect</code> suggests new lines from gate failures.</p>
+          <p className="hidden text-fg-subtle lg:block">Keep it under about 25 lines. Long rulebooks get skimmed.</p>
+        </aside>
+      </div>
+    </>
+  );
+}
+
+const HARNESSES: Harness[] = ["claude", "pi", "opencode", "commandcode"];
+
+const Row = ({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) => (
+  <div className="grid items-start gap-2 px-4 py-4 md:grid-cols-[220px_1fr] md:gap-6 md:px-5">
+    <div><div className="text-[13px] font-medium">{label}</div>{hint && <div className="mt-0.5 text-[12px] leading-snug text-fg-subtle">{hint}</div>}</div>
+    <div>{children}</div>
+  </div>
+);
+const Field = ({ label, children }: { label: string; children: ReactNode }) => (
+  <div className="min-w-0"><div className="mb-1 text-[11.5px] text-fg-subtle">{label}</div>{children}</div>
+);
+const Group = ({ title, children }: { title: string; children: ReactNode }) => (
+  <section className="mt-8">
+    <h2 className="mb-2 text-[13px] font-medium text-fg-muted">{title}</h2>
+    <div className="card divide-y divide-border">{children}</div>
+  </section>
+);
+function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <button role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)}
+      className={`relative h-5 w-9 rounded-full transition-colors ${checked ? "bg-primary" : "bg-border-strong"}`}>
+      <span className={`absolute top-0.5 size-4 rounded-full bg-surface shadow transition-all ${checked ? "left-[18px]" : "left-0.5"}`} />
+    </button>
+  );
+}
+
+export function Settings({ ws, toast }: { ws: Workspace; toast: (m: string) => void }) {
+  const s = useApi<any>(`/api/ws/${ws.id}/settings`, (e: FEvent) => e.ws === ws.id && e.type === "settings.changed");
+  const models = useApi<Models>("/api/models", () => false);
+  const [f, setF] = useState<any>(null);
+  useEffect(() => { if (s.data) setF(structuredClone(s.data)); }, [s.data]);
+  if (!f) return (
+    <>
+      <PageHeader title="Settings" sub=".factory/settings.json" />
+      <div className="grid flex-1 place-items-center text-center">
+        {s.error ? (
+          <div>
+            <p className="text-[14px] font-medium">Couldn't load settings</p>
+            <p className="mt-1 text-[13px] text-fg-muted">{s.error === "Failed to fetch" ? <>The daemon is offline. Start it with <code className="font-mono">factory up</code>.</> : s.error}</p>
+            <div className="mt-3"><Btn onClick={s.reload}>Retry</Btn></div>
+          </div>
+        ) : <p className="text-[13px] text-fg-subtle">Loading…</p>}
+      </div>
+    </>
+  );
+  const dirty = JSON.stringify(f) !== JSON.stringify(s.data);
+  const save = () => api(`/api/ws/${ws.id}/settings`, { method: "PUT", body: f }).then(() => { s.reload(); toast("Settings saved"); }).catch((e) => toast(e.message));
+  const num = `${inputCls} w-24`;
+  const reviewerFirst = f.reviewer_order.find((h: Harness) => h !== f.default_harness && f.harnesses[h]?.enabled);
+  const setH = (h: Harness, patch: object) => setF({ ...f, harnesses: { ...f.harnesses, [h]: { ...f.harnesses[h], ...patch } } });
+
+  return (
+    <>
+      <PageHeader title="Settings" sub=".factory/settings.json">
+        {dirty && <Btn kind="ghost" onClick={() => setF(structuredClone(s.data))}>Discard</Btn>}
+        <Btn kind="primary" disabled={!dirty} onClick={save}>Save changes</Btn>
+      </PageHeader>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-16 md:px-6">
+        <div className="mx-auto max-w-3xl">
+          <Group title="Harnesses">
+            {HARNESSES.map((h) => {
+              const c = f.harnesses[h];
+              return (
+                <div key={h} className="space-y-3 px-4 py-4 md:px-5">
+                  <div className="flex items-center gap-3">
+                    <Switch checked={c.enabled} onChange={(v) => setH(h, { enabled: v })} label={`enable ${h}`} />
+                    <span className="size-2 rounded-full" style={{ background: HARNESS_COLOR[h] }} />
+                    <span className="text-[13px] font-medium">{h}</span>
+                    {f.default_harness === h
+                      ? <Badge>default harness</Badge>
+                      : <span className="ml-auto"><Btn kind="ghost" disabled={!c.enabled} onClick={() => setF({ ...f, default_harness: h })}>Make default</Btn></span>}
+                  </div>
+                  <div className={`grid grid-cols-3 gap-3 ${c.enabled ? "" : "pointer-events-none opacity-50"}`}>
+                    <Field label="Enabled models">
+                      <MultiSelect ariaLabel={`${h} enabled models`} values={c.models}
+                        options={(models.data?.[h] ?? []).map((m) => ({ value: m.id, hint: m.hint }))}
+                        onChange={(ms) => setF({
+                          ...f,
+                          harnesses: { ...f.harnesses, [h]: { ...c, models: ms, model: ms.includes(c.model) ? c.model : "" } },
+                          reviewer_models: { ...f.reviewer_models, [h]: ms.includes(f.reviewer_models[h]) ? f.reviewer_models[h] : "" },
+                        })}>
+                        {models.data ? (c.models.length ? `${c.models.length} of ${models.data[h]?.length ?? 0} enabled` : "Default only") : "Loading…"}
+                      </MultiSelect>
+                    </Field>
+                    <Field label="Worker model"><Select ariaLabel={`${h} worker model`} value={c.model} options={modelOpts(c.models)} onChange={(v) => setH(h, { model: v })} /></Field>
+                    <Field label="Reviewer model"><Select ariaLabel={`${h} reviewer model`} value={f.reviewer_models[h] ?? ""} options={modelOpts(c.models)} onChange={(v) => setF({ ...f, reviewer_models: { ...f.reviewer_models, [h]: v } })} /></Field>
+                  </div>
+                </div>
+              );
+            })}
+          </Group>
+
+          <Group title="Workers">
+            <Row label="Max workers" hint="Parallel workers across all harnesses."><input type="number" min={1} max={16} className={num} value={f.max_workers} onChange={(e) => setF({ ...f, max_workers: Number(e.target.value) })} /></Row>
+            <Row label="Reviewer order" hint="The first enabled harness that differs from the implementer reviews its work.">
+              <div className="flex flex-wrap gap-1.5">
+                {f.reviewer_order.map((h: Harness, i: number) => (
+                  <button key={h} title={i ? "Move up" : undefined} onClick={() => { if (!i) return; const o = [...f.reviewer_order]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setF({ ...f, reviewer_order: o }); }}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[12.5px] hover:bg-hover">
+                    <span className="text-fg-subtle">{i + 1}</span><span className="size-1.5 rounded-full" style={{ background: HARNESS_COLOR[h] }} />{h}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[12px]" style={{ color: reviewerFirst ? "var(--success)" : "var(--warning)" }}>
+                {reviewerFirst ? `Work from ${f.default_harness} is reviewed by ${reviewerFirst}, a different model family.` : "Only one harness is enabled, so reviews use a different model on the same harness."}
+              </p>
+            </Row>
+            <Row label="Max gate attempts" hint="After this many attempts the ticket is marked failed."><input type="number" min={1} max={6} className={num} value={f.max_attempts} onChange={(e) => setF({ ...f, max_attempts: Number(e.target.value) })} /></Row>
+            <Row label="Question timeout" hint="Minutes before an unanswered, reversible question falls back to the worker's default."><input type="number" min={1} className={num} value={f.ask_timeout_min} onChange={(e) => setF({ ...f, ask_timeout_min: Number(e.target.value) })} /></Row>
+            <Row label="Auto mode budget" hint="Limits for /factory:auto. New workers stop starting at 70% of the budget.">
+              <div className="flex items-center gap-2 text-[13px] text-fg-muted">
+                <input type="number" className={num} value={f.auto_budget.hours} onChange={(e) => setF({ ...f, auto_budget: { ...f.auto_budget, hours: Number(e.target.value) } })} aria-label="hours" /> hours
+                <input type="number" className={num} value={f.auto_budget.tickets} onChange={(e) => setF({ ...f, auto_budget: { ...f.auto_budget, tickets: Number(e.target.value) } })} aria-label="tickets" /> tickets
+              </div>
+            </Row>
+          </Group>
+
+          <Group title="Merging">
+            <Row label="Base branch"><input className={`${inputCls} w-60 font-mono`} value={f.base_branch} onChange={(e) => setF({ ...f, base_branch: e.target.value })} /></Row>
+            <Row label="Base verify command" hint="Runs on the base branch after every merge. If it fails, the merge is reverted automatically.">
+              <input className={`${inputCls} font-mono`} value={f.verify_cmd} placeholder="bun test && bun run typecheck" onChange={(e) => setF({ ...f, verify_cmd: e.target.value })} />
+            </Row>
+            <Row label="Merge via">
+              <div className="inline-flex rounded-lg border border-border p-0.5">
+                {[["local", "Local squash"], ["pr", "GitHub PR"]].map(([m, l]) => (
+                  <button key={m} onClick={() => setF({ ...f, merge_via: m })} className={`h-7 rounded-md px-3 text-[12.5px] ${f.merge_via === m ? "bg-muted font-medium text-fg" : "text-fg-muted"}`}>{l}</button>
+                ))}
+              </div>
+            </Row>
+            <Row label="Auto-merge when green" hint="With this on, /factory:review merges tickets that pass every check without asking you."><Switch checked={f.auto_merge} onChange={(v) => setF({ ...f, auto_merge: v })} label="auto merge" /></Row>
+          </Group>
+
+          <Group title="Permissions">
+            <Row label="Claude allowlist" hint="One permission rule per line for Claude workers. The guard still blocks push, force, and writes outside scope.">
+              <textarea className={`${textareaCls} font-mono text-[12px]`} rows={6} value={f.allowed_tools.join("\n")} onChange={(e) => setF({ ...f, allowed_tools: e.target.value.split("\n").map((x) => x.trim()).filter(Boolean) })} />
+            </Row>
+          </Group>
+        </div>
+      </div>
+    </>
+  );
+}
