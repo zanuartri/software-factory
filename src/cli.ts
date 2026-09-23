@@ -175,7 +175,7 @@ switch (cmd) {
   case "wait": {
     const w = await currentWs();
     const since = existsSync(cursorFile(w.id)) ? Number(readFileSync(cursorFile(w.id), "utf8")) : 0;
-    const res = await api("GET", `/api/ws/${w.id}/wait?since=${flags.since ?? since}&timeout=${flags.timeout ?? 1800}`);
+    const res = await api("GET", `/api/ws/${w.id}/wait?since=${flags.since ?? since}&timeout=${Math.min(Number(flags.timeout ?? 240), 240)}`);
     writeFileSync(cursorFile(w.id), String(res.cursor));
     out(res.events.length ? res.events.map(fmtEvent).join("\n") : "(no coordinator events — still working; run `factory wait` again)", res);
     break;
