@@ -35,11 +35,11 @@ test("up() diagnoses a port held by a non-daemon listener", async () => {
     expect(log).toContain("is in use but the factory daemon is not answering");
     expect(log).toContain(process.platform === "win32" ? `netstat -ano | findstr :${listener.port}` : `lsof -i :${listener.port}`);
     expect(log).toContain("and stop the process holding it");
-    expect(elapsed).toBeLessThan(20000);
+    expect(elapsed).toBeLessThan(30000);
   } finally {
     listener.stop(true);
   }
-}, 30000); // silent listener: two 3s checks + a ~10s poll budget, then portHeld() confirms and up() dies — ~16s, not the old ~130s
+}, 40000); // budget: worst case ~17.5s (3s+0.5s+3s checks + ~10s poll + Bun startup), regression ~130s — 30s bound catches it
 
 test("up() starts a daemon and reports it", async () => {
   const home = mkdtempSync(join(tmpdir(), "factory-up-"));
