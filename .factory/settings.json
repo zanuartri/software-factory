@@ -2,7 +2,7 @@
   "base_branch": "main",
   "harnesses": {
     "claude": {
-      "enabled": true,
+      "enabled": false,
       "model": "claude-sonnet-5",
       "models": [
         "sonnet",
