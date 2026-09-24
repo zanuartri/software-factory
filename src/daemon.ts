@@ -30,9 +30,6 @@ function watchWs(id: string, path: string) {
     t = setTimeout(() => emit(id, "store.changed", {}), 250);
   }));
 }
-for (const w of sup.listWorkspaces()) watchWs(w.id, w.path);
-sup.recoverAfterRestart();
-
 type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
 const wrap = (h: Handler) => async (req: any) => {
   try { return await h(req); } catch (e: any) { return json({ error: e?.message ?? String(e) }, 400); }
@@ -197,6 +194,8 @@ const server = Bun.serve({
     message() {},
   },
 });
+for (const w of sup.listWorkspaces()) watchWs(w.id, w.path);
+sup.recoverAfterRestart();
 onEvent((e) => server.publish("events", JSON.stringify(e)));
 console.log(`factoryd listening on http://127.0.0.1:${PORT} (home ${HOME}, pid ${process.pid})`);
 
