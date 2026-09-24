@@ -23,10 +23,13 @@ const out = (human: string, data?: unknown) => console.log(asJson && data !== un
 const die = (msg: string): never => { console.error(`factory: ${msg}`); process.exit(1); };
 
 async function alive() {
-  return fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(800) }).then((r) => r.ok).catch(() => false);
+  return fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok).catch(() => false);
 }
 async function up() {
   if (await alive()) return;
+  await Bun.sleep(500);
+  if (await alive()) return;
+  if (process.env.FACTORY_RUN_ID) die(`no factory daemon at ${BASE_URL} — workers must not start one`);
   mkdirSync(HOME, { recursive: true });
   const log = openSync(join(HOME, "daemon.log"), "a");
   const p = Bun.spawn(["bun", join(ROOT, "src", "daemon.ts")], { stdio: ["ignore", log, log], detached: true, cwd: ROOT, windowsHide: true });
