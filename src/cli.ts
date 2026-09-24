@@ -45,7 +45,7 @@ async function up() {
 }
 async function api(method: string, path: string, body?: unknown, raw = false) {
   await up();
-  const res = await fetch(BASE_URL + path, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body) });
+  const res = await fetch(BASE_URL + path, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body), timeout: false });
   if (raw) return res.text();
   const data = await res.json().catch(() => ({}));
   if (!res.ok) die(`${data.error ?? res.status}${data.brief_errors ? "\n  - " + data.brief_errors.join("\n  - ") : ""}`);
