@@ -26,6 +26,7 @@ test("a daemon that cannot bind its port leaves live runs untouched", async () =
     });
 
     expect(p.exitCode).not.toBe(0);
+    expect(p.stderr.toString()).toContain("EADDRINUSE");
     expect(status("r1")).toBe("running");
     expect(alive(dummy.pid)).toBe(true);
   } finally {
@@ -35,21 +36,30 @@ test("a daemon that cannot bind its port leaves live runs untouched", async () =
 });
 
 test("a daemon that binds its port still recovers stale runs", async () => {
-  const free = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
-  const port = free.port;
-  free.stop(true);
   addRunning("r2", null);
-  const p = Bun.spawn(["bun", join(import.meta.dir, "daemon.ts")], {
-    env: { ...process.env, FACTORY_PORT: String(port) }, stdout: "ignore", stderr: "ignore", windowsHide: true,
-  });
-  try {
-    let up = false;
+  let port = 0, up = false;
+  let p: ReturnType<typeof Bun.spawn> | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (p) { await Promise.race([p.exited, Bun.sleep(3000)]); p.kill(); p = undefined; }
+    // another process may grab the port between stop() and the daemon's bind; retry once on EADDRINUSE
+    const free = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+    port = free.port;
+    free.stop(true);
+    p = Bun.spawn(["bun", join(import.meta.dir, "daemon.ts")], {
+      env: { ...process.env, FACTORY_PORT: String(port) }, stdout: "ignore", stderr: "pipe", windowsHide: true,
+    });
+    const errText = new Response(p.stderr as ReadableStream<Uint8Array>).text();
     for (let i = 0; i < 200 && !up; i++) { up = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.ok, () => false); if (!up) await Bun.sleep(50); }
+    if (up) break;
+    const err = await Promise.race([errText, Bun.sleep(3000).then(() => "")]);
+    if (attempt === 1 || !err.includes("EADDRINUSE")) break;
+  }
+  try {
     expect(up).toBe(true);
     expect(status("r2")).toBe("idle");
   } finally {
     await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST" }).catch(() => {});
-    await Promise.race([p.exited, Bun.sleep(3000)]);
-    p.kill();
+    await Promise.race([p!.exited, Bun.sleep(3000)]);
+    p!.kill();
   }
 });
