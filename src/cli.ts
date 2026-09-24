@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { BASE_URL, HOME } from "./db";
+import { BASE_URL, HOME, PORT } from "./db";
 import { repoRoot } from "./git";
 import { ROOT } from "./prompts";
 import { settingsPatch } from "./store";
@@ -25,6 +25,7 @@ const die = (msg: string): never => { console.error(`factory: ${msg}`); process.
 async function alive() {
   return fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok).catch(() => false);
 }
+const portHeld = () => Bun.connect({ hostname: "127.0.0.1", port: PORT, socket: { data() {}, open(s) { s.end(); } } }).then(() => true, () => false);
 async function up() {
   if (await alive()) return;
   await Bun.sleep(500);
@@ -35,6 +36,7 @@ async function up() {
   const p = Bun.spawn(["bun", join(ROOT, "src", "daemon.ts")], { stdio: ["ignore", log, log], detached: true, cwd: ROOT, windowsHide: true });
   p.unref();
   for (let i = 0; i < 40; i++) { if (await alive()) return; await Bun.sleep(250); }
+  if (await portHeld()) die(`port ${PORT} is in use but the factory daemon is not answering — find the holder with \`${process.platform === "win32" ? `netstat -ano | findstr :${PORT}` : `lsof -i :${PORT}`}\` and stop the process holding it (or free the port); see ${join(HOME, "daemon.log")}`);
   die(`daemon did not start; see ${join(HOME, "daemon.log")}`);
 }
 async function api(method: string, path: string, body?: unknown, raw = false) {
