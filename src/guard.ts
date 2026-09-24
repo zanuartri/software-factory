@@ -87,6 +87,18 @@ export function ctxFromEnv(): GuardCtx | null {
   };
 }
 
+/** Scope the ticket has right now; any failure (no env, network, non-200, bad JSON) keeps the spawn-time scope. */
+export async function liveScope(ctx: GuardCtx): Promise<string[]> {
+  const url = process.env.FACTORY_URL, run = process.env.FACTORY_RUN_ID, token = process.env.FACTORY_TOKEN;
+  if (!url || !run) return ctx.scope;
+  try {
+    const res = await fetch(`${url}/api/runs/${run}/scope`, { headers: { "x-factory-token": token ?? "" }, signal: AbortSignal.timeout(800) });
+    if (!res.ok) return ctx.scope;
+    const d = (await res.json()) as { scope?: unknown };
+    return Array.isArray(d.scope) && d.scope.every((s) => typeof s === "string") ? d.scope : ctx.scope;
+  } catch { return ctx.scope; }
+}
+
 export async function reportBlock(tool: string, reason: string) {
   const url = process.env.FACTORY_URL, run = process.env.FACTORY_RUN_ID, token = process.env.FACTORY_TOKEN;
   if (!url || !run) return;

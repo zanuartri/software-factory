@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { check } from "./guard";
+import { check, liveScope } from "./guard";
 
 const wt = join(process.cwd(), "wt");
 const ctx = { worktree: wt, scope: ["src/auth/**", "tests/auth"], role: "worker" as const };
@@ -35,4 +35,42 @@ test("reviewer is read-only", () => {
   expect(check("Write", { file_path: join(wt, "src/auth/a.ts") }, r).allow).toBe(false);
   expect(check("Bash", { command: "git commit -am x" }, r).allow).toBe(false);
   expect(check("Bash", { command: "bun test" }, r).allow).toBe(true);
+});
+
+const liveCtx = { worktree: wt, scope: ["src/auth/**"], role: "worker" as const };
+const useEnv = (url: string) => { process.env.FACTORY_URL = url; process.env.FACTORY_RUN_ID = "run-1"; process.env.FACTORY_TOKEN = "tok"; };
+const unsetEnv = () => { for (const k of ["FACTORY_URL", "FACTORY_RUN_ID", "FACTORY_TOKEN"]) delete process.env[k]; };
+async function withStub(handler: (req: Request) => Response, f: () => Promise<void>) {
+  const srv = Bun.serve({ port: 0, fetch: handler });
+  useEnv(`http://127.0.0.1:${srv.port}`);
+  try { await f(); } finally { srv.stop(true); unsetEnv(); }
+}
+
+test("liveScope: daemon scope wins and check honors the widened path", async () => {
+  await withStub((req) => {
+    const u = new URL(req.url);
+    if (u.pathname !== "/api/runs/run-1/scope" || req.headers.get("x-factory-token") !== "tok") return new Response("no", { status: 401 });
+    return Response.json({ scope: ["src/auth/**", "tests/**"] });
+  }, async () => {
+    expect(check("Write", { file_path: join(wt, "tests/new.ts") }, liveCtx).allow).toBe(false);
+    expect(await liveScope(liveCtx)).toEqual(["src/auth/**", "tests/**"]);
+    expect(check("Write", { file_path: join(wt, "tests/new.ts") }, { ...liveCtx, scope: await liveScope(liveCtx) }).allow).toBe(true);
+  });
+});
+
+test("liveScope: unreachable daemon falls back to env scope", async () => {
+  useEnv("http://127.0.0.1:1");
+  try { expect(await liveScope(liveCtx)).toEqual(["src/auth/**"]); } finally { unsetEnv(); }
+});
+
+test("liveScope: 401 falls back to env scope", async () => {
+  await withStub(() => new Response("no", { status: 401 }), async () => {
+    expect(await liveScope(liveCtx)).toEqual(["src/auth/**"]);
+  });
+});
+
+test("liveScope: invalid JSON falls back to env scope", async () => {
+  await withStub(() => new Response("<html>not json</html>"), async () => {
+    expect(await liveScope(liveCtx)).toEqual(["src/auth/**"]);
+  });
 });

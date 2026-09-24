@@ -129,6 +129,13 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       return json({ ok: true });
     },
   },
+  "/api/runs/:id/scope": {
+    GET: (req) => {
+      const r = getRun(req.params.id);
+      if (!r || req.headers.get("x-factory-token") !== r.token) return json({ error: "unauthorized" }, 401);
+      return json({ scope: store.getTicket(sup.mustWs(r.ws).path, r.ticket)?.scope_paths ?? [] });
+    },
+  },
 
   "/api/ws/:ws/asks": { GET: ({ params }) => json(db.query("SELECT * FROM asks WHERE ws=? ORDER BY id DESC LIMIT 100").all(params.ws)) },
   "/api/asks/:id/answer": { POST: async (req) => { const b = await body(req); sup.answerAsk(Number(req.params.id), b.answer, b.by ?? "human"); return json({ ok: true }); } },
