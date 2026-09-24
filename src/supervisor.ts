@@ -743,6 +743,8 @@ export function doctor(ws?: string) {
     add(`${w.id}: rules.md scanned`, !/run \/factory:init/.test(store.loadRules(w.path)), "standing orders");
     add(`${w.id}: verify recipe`, existsSync(join(w.path, ".factory", "verify.md")), ".factory/verify.md");
     for (const [h, c] of Object.entries(s.harnesses)) if (c.enabled) add(`${w.id}: harness ${h}`, !!Bun.which(h), c.model || "default model");
+    const n = Object.keys(s.catalog).length;
+    add(`${w.id}: model catalog`, true, n ? `${(s as any)[store.CATALOG_FROM_GLOBAL] ? "global" : "repo"} (${n} entries)` : "none — routing uses default_harness");
     const rc = reviewerCheck(s);
     add(`${w.id}: cross-family reviewer`, rc.ok, rc.detail);
     const invalid = store.listTickets(w.path).filter((t) => t.status === "open" && store.validateBrief(t).length);

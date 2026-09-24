@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Ticket } from "./store";
@@ -246,4 +246,22 @@ test("doctor's bin:bash check points at the bash the gate actually runs", () => 
     expect(c.ok).toBe(true);
     expect(c.detail).toBe(bashPath());
   }
+});
+
+test("doctor: the model catalog line names where the catalog came from", () => {
+  const globalFile = join(process.env.FACTORY_HOME!, "catalog.json");
+  const cat = (id: string, settings: object) => {
+    const root = mkdtempSync(join(tmpdir(), `factory-ws-${id}-`));
+    mkdirSync(join(root, ".factory"), { recursive: true });
+    writeFileSync(join(root, ".factory", "settings.json"), JSON.stringify(settings));
+    db.query("INSERT INTO workspaces (id,name,path,created_at) VALUES (?,?,?,?)").run(id, id, root, Date.now());
+    const c = () => doctor(id).find((x) => x.name === `${id}: model catalog`)!;
+    return c;
+  };
+
+  writeFileSync(globalFile, JSON.stringify({ "pi:hy3": { cost: 2, quality: 5, family: "pi" }, "commandcode:deepseek": { cost: 1, quality: 4, family: "cc" } }));
+  expect(cat("cat-global", {})()).toEqual({ name: "cat-global: model catalog", ok: true, detail: "global (2 entries)" });
+  expect(cat("cat-repo", { catalog: { "claude:opus": { cost: 9, quality: 5, family: "claude" } } })().detail).toBe("repo (1 entries)");
+  rmSync(globalFile, { force: true });
+  expect(cat("cat-none", { catalog: {} })()).toEqual({ name: "cat-none: model catalog", ok: true, detail: "none — routing uses default_harness" });
 });

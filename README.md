@@ -54,3 +54,7 @@ ui/         React + Vite + Tailwind console
 ## Env
 
 `FACTORY_PORT` (default 4545) and `FACTORY_HOME` (default `~/.factory`). Set both to run an isolated instance.
+
+Cost-first routing reads a global model catalog at `~/.factory/catalog.json`, with the same shape as a repo's `catalog`
+setting (`"<harness>:<model>"` → `{ cost, quality, family, caps? }`). A repo whose `.factory/settings.json` defines a
+non-empty `catalog` uses that instead — a new repo gets the global one for free; edit it by hand, `factory doctor` names it.

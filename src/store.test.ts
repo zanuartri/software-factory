@@ -1,5 +1,26 @@
-import { expect, test } from "bun:test";
-import { DEFAULT_SETTINGS, settingsPatch } from "./store";
+import { beforeEach, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const home = mkdtempSync(join(tmpdir(), "factory-store-home-"));
+process.env.FACTORY_HOME = home;
+const { CATALOG_FROM_GLOBAL, DEFAULT_SETTINGS, loadSettings, saveSettings, settingsPatch } = await import("./store");
+
+const CATALOG = {
+  "pi:hy3": { cost: 2, quality: 5, family: "pi" },
+  "commandcode:deepseek": { cost: 1, quality: 4, family: "cc" },
+};
+const globalFile = join(home, "catalog.json");
+const setGlobal = (text: string | null) => (text === null ? rmSync(globalFile, { force: true }) : writeFileSync(globalFile, text));
+/** store.ts reads FACTORY_HOME per call, but another test file may have repointed it by the time we run. */
+beforeEach(() => { process.env.FACTORY_HOME = home; });
+const mkRepo = (settings?: object) => {
+  const repo = mkdtempSync(join(tmpdir(), "factory-store-repo-"));
+  if (settings) { mkdirSync(join(repo, ".factory"), { recursive: true }); writeFileSync(join(repo, ".factory", "settings.json"), JSON.stringify(settings)); }
+  return repo;
+};
+const savedRepo = (repo: string) => JSON.parse(readFileSync(join(repo, ".factory", "settings.json"), "utf8"));
 
 test("settingsPatch: JSON form still works", () => {
   expect(settingsPatch(DEFAULT_SETTINGS, ['{"max_workers":5}'])).toEqual({ max_workers: 5 });
@@ -73,4 +94,63 @@ test("settingsPatch: empty value throws naming the bad arg", () => {
 test("settingsPatch: array setting corrupted into a string heals via the default type", () => {
   const cur = { ...DEFAULT_SETTINGS, reviewer_order: "[claude]" as any };
   expect(settingsPatch(cur, ["reviewer_order=[claude,pi]"]).reviewer_order).toEqual(["claude", "pi"]);
+});
+
+test("loadSettings: a global catalog fills in when the repo has none", () => {
+  setGlobal(JSON.stringify(CATALOG));
+  expect(loadSettings(mkRepo({})).catalog).toEqual(CATALOG); // no catalog key
+  expect(loadSettings(mkRepo({ catalog: {} })).catalog).toEqual(CATALOG); // the empty default
+});
+
+test("loadSettings: the repo's own catalog wins entirely", () => {
+  setGlobal(JSON.stringify(CATALOG));
+  const own = { "claude:opus": { cost: 9, quality: 5, family: "claude" } };
+  const s = loadSettings(mkRepo({ catalog: own }));
+  expect(s.catalog).toEqual(own);
+  expect((s as any)[CATALOG_FROM_GLOBAL]).toBeUndefined();
+});
+
+test("loadSettings: a missing, empty or unparsable global file means no catalog", () => {
+  setGlobal(null);
+  expect(loadSettings(mkRepo({})).catalog).toEqual({});
+  setGlobal("");
+  expect(loadSettings(mkRepo({ catalog: {} })).catalog).toEqual({});
+  setGlobal("{ not json");
+  expect(loadSettings(mkRepo({ catalog: {} })).catalog).toEqual({});
+});
+
+test("loadSettings: a settings save never copies the global catalog into the repo", () => {
+  setGlobal(JSON.stringify(CATALOG));
+  const repo = mkRepo({});
+  saveSettings(repo, { ...loadSettings(repo), max_workers: 5 }); // daemon.ts settings PUT
+  expect(savedRepo(repo).catalog).toEqual({});
+  expect(savedRepo(repo).max_workers).toBe(5);
+  const other = mkRepo({ catalog: {} });
+  saveSettings(other, { ...loadSettings(other), base_branch: "dev" }); // supervisor.ts workspace setup
+  expect(savedRepo(other).catalog).toEqual({});
+});
+
+test("loadSettings: the repo's own catalog survives a settings save", () => {
+  setGlobal(JSON.stringify(CATALOG));
+  const own = { "pi:hy3": { cost: 2, quality: 5, family: "pi" } };
+  const repo = mkRepo({ catalog: own });
+  saveSettings(repo, { ...loadSettings(repo), max_workers: 2 });
+  expect(savedRepo(repo).catalog).toEqual(own);
+});
+
+test("loadSettings: an explicit catalog patch is persisted, not stripped", () => {
+  setGlobal(JSON.stringify(CATALOG));
+  const repo = mkRepo({});
+  const own = { "claude:opus": { cost: 9, quality: 5, family: "claude" } };
+  const patch = settingsPatch(loadSettings(repo), [JSON.stringify({ catalog: own })]); // factory settings set '{"catalog":…}'
+  saveSettings(repo, { ...loadSettings(repo), ...patch }); // daemon.ts settings PUT
+  expect(savedRepo(repo).catalog).toEqual(own);
+});
+
+test("loadSettings: a settings save that echoes the inherited catalog back still drops it", () => {
+  setGlobal(JSON.stringify(CATALOG));
+  const repo = mkRepo({ catalog: {} });
+  const echo = JSON.parse(JSON.stringify(loadSettings(repo).catalog)); // the UI PUTs the whole GET body back
+  saveSettings(repo, { ...loadSettings(repo), catalog: echo });
+  expect(savedRepo(repo).catalog).toEqual({});
 });

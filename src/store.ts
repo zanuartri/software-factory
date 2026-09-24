@@ -1,5 +1,6 @@
 // <repo>/.factory is the git-tracked source of truth for tickets, issues, rules and settings.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Harness } from "./db";
 
@@ -56,13 +57,35 @@ export function ensureLayout(repo: string) {
   if (!existsSync(dir(repo, "rules.md"))) writeFileSync(dir(repo, "rules.md"), "# Standing orders\n\n1. (run /factory:init to scan the repo)\n");
 }
 
+/** `<FACTORY_HOME>/catalog.json`, the same default db.ts uses — computed here to avoid the DB import side effect. */
+const globalCatalogPath = () => join(process.env.FACTORY_HOME ?? join(homedir(), ".factory"), "catalog.json");
+const isCatalog = (c: unknown): c is Settings["catalog"] => !!c && typeof c === "object" && !Array.isArray(c);
+
+/** A missing, empty or unparsable global catalog means "no global catalog". */
+function globalCatalog(): Settings["catalog"] {
+  try { const c = JSON.parse(readFileSync(globalCatalogPath(), "utf8")); return isCatalog(c) ? c : {}; } catch { return {}; }
+}
+
+/** Set on the object `loadSettings` returns when the catalog was inherited, so `saveSettings` can drop it again.
+ *  A symbol survives object spread (the settings PUT does `{ ...loadSettings(p), ...patch }`) but is skipped by
+ *  JSON.stringify, so the mark itself never lands in a repo's settings.json. */
+export const CATALOG_FROM_GLOBAL = Symbol("catalog inherited from the global catalog");
+
 export function loadSettings(repo: string): Settings {
   const p = dir(repo, "settings.json");
   const raw = existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : {};
   const harnesses = Object.fromEntries(Object.entries(DEFAULT_SETTINGS.harnesses).map(([h, d]) => [h, { ...d, ...raw.harnesses?.[h] }])) as Settings["harnesses"];
-  return { ...DEFAULT_SETTINGS, ...raw, harnesses };
+  const own = isCatalog(raw.catalog) ? raw.catalog : {};
+  const inherited = !Object.keys(own).length;
+  const s = { ...DEFAULT_SETTINGS, ...raw, harnesses, catalog: inherited ? globalCatalog() : own };
+  if (inherited) s[CATALOG_FROM_GLOBAL] = true;
+  return s;
 }
-export const saveSettings = (repo: string, s: Settings) => writeFileSync(dir(repo, "settings.json"), JSON.stringify(s, null, 2) + "\n");
+
+/** An inherited catalog is stripped here, so saving settings never copies the global one into a repo file. Only a
+ *  catalog still identical to the global file is dropped: an explicit `catalog` in the patch is the user's and stays. */
+export const saveSettings = (repo: string, s: Settings) =>
+  writeFileSync(dir(repo, "settings.json"), JSON.stringify((s as any)[CATALOG_FROM_GLOBAL] && JSON.stringify(s.catalog) === JSON.stringify(globalCatalog()) ? { ...s, catalog: {} } : s, null, 2) + "\n");
 
 /** PowerShell 5.1 strips embedded double quotes, so `["claude"]` arrives as `[claude]` and JSON.parse fails.
  *  When the current value (or the default at this key) is an array, fall back to a comma list (with or
