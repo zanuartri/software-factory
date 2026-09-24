@@ -28,6 +28,18 @@ function gateOutcomes(harness: Harness, model: string, passes: number, fails: nu
   }
 }
 
+let stallSeq = 0;
+/** One worker run + one stall/blocked event per outcome, matching blockTicket's shape: reason inside `data`. */
+function stallOutcomes(harness: Harness, model: string, type: "run.timebox" | "ticket.blocked", n: number, reason = "") {
+  for (let i = 0; i < n; i++) {
+    const id = `r-${harness}-${model}-s${stallSeq++}`;
+    db.query("INSERT INTO runs (id,ws,ticket,role,harness,model,status,token,started_at) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run(id, "w", "T-1", "worker", harness, model, "done", "tok", Date.now());
+    db.query("INSERT INTO events (ws,ticket,run,type,data,ts) VALUES (?,?,?,?,?,?)")
+      .run("w", "T-1", id, type, JSON.stringify({ minutes: 45, reason }), Date.now());
+  }
+}
+
 test("scope overlap decides what may run in parallel", () => {
   expect(scopesOverlap(["src/auth/**"], ["src/auth/session.ts"])).toBe(true);
   expect(scopesOverlap(["src/auth"], ["src/auth/x/**"])).toBe(true);
@@ -144,6 +156,30 @@ test("effectiveQuality: caches the pair's record instead of re-querying", () => 
   expect(effectiveQuality("pi:cached", 3)).toBe(3);
   gateOutcomes("pi", "cached", 0, 6); // would demote, but the pass already read this pair
   expect(effectiveQuality("pi:cached", 3)).toBe(3);
+});
+
+test("effectiveQuality: hitting the timebox counts as a failure", () => {
+  gateOutcomes("claude", "stall-timebox", 3, 0);
+  stallOutcomes("claude", "stall-timebox", "run.timebox", 3);
+  expect(effectiveQuality("claude:stall-timebox", 4)).toBe(3);
+});
+
+test("effectiveQuality: stopping twice without factory_submit counts as a failure", () => {
+  gateOutcomes("claude", "stall-submit", 3, 0);
+  stallOutcomes("claude", "stall-submit", "ticket.blocked", 3, "worker stopped twice without factory_submit");
+  expect(effectiveQuality("claude:stall-submit", 4)).toBe(3);
+});
+
+test("effectiveQuality: a neutral block (worker process exited) keeps the base", () => {
+  gateOutcomes("claude", "stall-neutral", 5, 0);
+  stallOutcomes("claude", "stall-neutral", "ticket.blocked", 1, "worker process exited (code 1) — resume with `factory tell T-1`");
+  expect(effectiveQuality("claude:stall-neutral", 4)).toBe(4);
+});
+
+test("effectiveQuality: neutral blocks do not pad the outcome count", () => {
+  gateOutcomes("claude", "stall-neutral-count", 3, 0);
+  stallOutcomes("claude", "stall-neutral-count", "ticket.blocked", 3, "worker process exited (code 1)");
+  expect(effectiveQuality("claude:stall-neutral-count", 4)).toBe(4); // 3 outcomes, below the >=5 minimum
 });
 
 test("pickWorker: a demoted pair loses to the next-cheapest qualifying pair", () => {

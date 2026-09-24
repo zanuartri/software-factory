@@ -119,13 +119,16 @@ const qualityCache = new Map<string, { passes: number; total: number; at: number
 /** A pass must see the outcomes it just produced, so clear the record at the start of every schedule pass. */
 const clearQualityCache = () => qualityCache.clear();
 
-/** Last 30 gate outcomes (worker runs only, all workspaces) for one catalog pair, cached ~60s / per pass. */
+/** Last 30 quality outcomes (worker runs only, all workspaces) for one catalog pair, cached ~60s / per pass.
+ *  Stalls count as failures: a timebox, or a "stopped twice without factory_submit" block. Other blocked reasons stay neutral. */
 function gateRecord(key: string) {
   const hit = qualityCache.get(key);
   if (hit && Date.now() - hit.at < QUALITY_TTL) return hit;
   const i = key.indexOf(":");
   const rows = db.query(
-    "SELECT e.type AS type FROM events e JOIN runs r ON r.id=e.run WHERE e.type IN ('gate.passed','gate.failed') AND r.role='worker' AND r.harness=? AND r.model=? ORDER BY e.id DESC LIMIT 30",
+    `SELECT e.type AS type FROM events e JOIN runs r ON r.id=e.run
+     WHERE (e.type IN ('gate.passed','gate.failed','run.timebox') OR (e.type='ticket.blocked' AND e.data LIKE '%without factory_submit%'))
+       AND r.role='worker' AND r.harness=? AND r.model=? ORDER BY e.id DESC LIMIT 30`,
   ).all(key.slice(0, i), key.slice(i + 1)) as { type: string }[];
   const rec = { passes: rows.filter((r) => r.type === "gate.passed").length, total: rows.length, at: Date.now() };
   qualityCache.set(key, rec);
