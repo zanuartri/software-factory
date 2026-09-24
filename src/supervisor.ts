@@ -14,6 +14,8 @@ const timers = new Map<string, ReturnType<typeof setTimeout>[]>();
 const nudges = new Map<string, number>();
 const remoteSnap = new Map<string, string>();
 const submitted = new Set<string>();
+/** Runs mid abort+resume on a one-process-per-turn adapter: the killed turn's late turn_end must not nudge the resume turn. */
+const aborting = new Set<string>();
 
 type Plan = { active: boolean; spawnStopAt: number; deadline: number; maxTickets: number; started: number; only?: string[]; mode: "run" | "auto" };
 const plans = new Map<string, Plan>();
@@ -306,7 +308,8 @@ export async function spawnWorker(ws: string, ticketId: string, o: { harness?: H
 
 const isLive = (id: string) => ["starting", "running", "idle", "paused"].includes(getRun(id)?.status ?? "");
 
-async function startAdapter(run: Run, prompt: string, extra: { resumeSession?: string | null; allowedTools?: string[] }) {
+/** Test seam (abort.test.ts): starts ADAPTERS[harness] for an existing run row and registers its handle. */
+export async function startAdapter(run: Run, prompt: string, extra: { resumeSession?: string | null; allowedTools?: string[] }) {
   const adapter = ADAPTERS[run.harness];
   const w = getWs(run.ws)!;
   const t = store.getTicket(w.path, run.ticket)!;
@@ -341,6 +344,7 @@ function onAdapterEvent(id: string, e: NormEvent) {
     case "turn_end": {
       if (e.usage) updateRun(id, { tokens: r.tokens + e.usage });
       if (!isLive(id) || r.status === "paused") return;
+      if (aborting.has(id)) return; // the aborted turn's late result, not a real turn end — the resume turn owns the next one
       if (e.error) emit(r.ws, "run.error", { error: e.error }, meta);
       if (r.role === "reviewer" && verdictWaiters.has(id)) {
         const n = (nudges.get(id) ?? 0) + 1; nudges.set(id, n);
@@ -569,10 +573,18 @@ export function steer(runId: string, text: string) {
 export async function abortRun(runId: string, text?: string) {
   const r = getRun(runId);
   if (!r) throw new Error("unknown run");
-  await handles.get(runId)?.abort();
-  emit(r.ws, "run.abort", { text }, { ticket: r.ticket, run: runId });
-  if (text) { db.query("UPDATE mailbox SET delivered=1 WHERE run=?").run(runId); await sendOrResume(runId, `⛔ Interrupted by the coordinator:\n${text}`); }
-  else updateRun(runId, { status: "paused" });
+  if (text && ADAPTERS[r.harness].caps.oneProcPerTurn) aborting.add(runId); // only a killed process-per-turn leaks a late turn_end; claude/pi steer in-band, opencode's in-session abort keeps its own end
+  try {
+    await handles.get(runId)?.abort();
+    emit(r.ws, "run.abort", { text }, { ticket: r.ticket, run: runId });
+    if (text) {
+      db.query("UPDATE mailbox SET delivered=1 WHERE run=?").run(runId);
+      if (["paused", "idle"].includes(getRun(runId)!.status)) updateRun(runId, { status: "running" }); // a resume turn is starting: no longer parked
+      await sendOrResume(runId, `⛔ Interrupted by the coordinator:\n${text}`);
+    } else updateRun(runId, { status: "paused" });
+  } finally {
+    aborting.delete(runId);
+  }
 }
 
 export const killRun = (runId: string) => {

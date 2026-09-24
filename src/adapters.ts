@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Harness } from "./db";
 import { ROOT } from "./prompts";
 
-export type Caps = { liveSteer: boolean; abort: boolean; resume: boolean };
+export type Caps = { liveSteer: boolean; abort: boolean; resume: boolean; oneProcPerTurn: boolean };
 export type NormEvent =
   | { type: "session"; id: string }
   | { type: "text"; text: string }
@@ -68,7 +68,7 @@ const guardCmd = `bun "${join(ROOT, "src", "guard-hook.ts").replace(/\\/g, "/")}
 
 // ---------------------------------------------------------------- claude
 const claude: Adapter = {
-  caps: { liveSteer: true, abort: true, resume: true },
+  caps: { liveSteer: true, abort: true, resume: true, oneProcPerTurn: false },
   async start(o) {
     const mcp = join(o.runDir, "mcp.json"), settings = join(o.runDir, "claude-settings.json");
     writeFileSync(mcp, JSON.stringify({ mcpServers: { factory: { type: "http", url: o.mcpUrl } } }));
@@ -109,7 +109,7 @@ const claude: Adapter = {
 
 // ---------------------------------------------------------------- pi (rpc)
 const pi: Adapter = {
-  caps: { liveSteer: true, abort: true, resume: true },
+  caps: { liveSteer: true, abort: true, resume: true, oneProcPerTurn: false },
   async start(o) {
     const args = [...bin("pi"), "--mode", "rpc", "--session-dir", join(o.runDir, "pi-sessions"),
       "-e", join(ROOT, "harness", "pi-extension.ts"), "--approve"];
@@ -148,7 +148,7 @@ const pi: Adapter = {
 
 // ---------------------------------------------------------------- opencode (serve)
 const opencode: Adapter = {
-  caps: { liveSteer: false, abort: true, resume: true },
+  caps: { liveSteer: false, abort: true, resume: true, oneProcPerTurn: false },
   async start(o) {
     const config = {
       mcp: { factory: { type: "remote", url: o.mcpUrl, enabled: true } },
@@ -207,7 +207,7 @@ const opencode: Adapter = {
 
 // ---------------------------------------------------------------- commandcode (-p NDJSON, one process per turn)
 const commandcode: Adapter = {
-  caps: { liveSteer: false, abort: true, resume: true },
+  caps: { liveSteer: false, abort: true, resume: true, oneProcPerTurn: true },
   async start(o) {
     // async: spawnSync here would freeze the whole daemon for several seconds
     await Bun.spawn([...bin("commandcode"), "mcp", "remove", "factory"], { cwd: o.cwd, stdout: "ignore", stderr: "ignore", windowsHide: true }).exited;
@@ -228,6 +228,7 @@ const commandcode: Adapter = {
         if (e?.type === "event" && e.event?.type === "tool_running") o.onEvent({ type: "tool", name: e.event.toolName, detail: e.event.description });
         if (e?.type === "result") {
           if (e.sessionId && e.sessionId !== sid) { sid = e.sessionId; o.onEvent({ type: "session", id: sid! }); }
+          if (p !== proc) return; // superseded turn: its late result must not nudge or idle the replacement turn
           if (e.finalText) o.onEvent({ type: "text", text: e.finalText });
           o.onEvent({ type: "turn_end", usage: (e.usage?.inputTokens ?? e.usage?.input_tokens ?? 0) + (e.usage?.outputTokens ?? e.usage?.output_tokens ?? 0), error: e.subtype === "error" ? e.error : undefined });
         }
@@ -238,7 +239,7 @@ const commandcode: Adapter = {
     return {
       get pid() { return proc?.pid ?? null; },
       async send(text) { if (proc && proc.exitCode === null) { killTree(proc.pid); await proc.exited; } turn(text); },
-      async abort() { if (proc) killTree(proc.pid); },
+      async abort() { if (proc) { killTree(proc.pid); await proc.exited; } }, // old turn fully stopped before the resume turn starts
       kill() { if (proc) killTree(proc.pid); o.onEvent({ type: "exit", code: null }); },
     };
   },

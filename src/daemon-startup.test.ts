@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.FACTORY_HOME = mkdtempSync(join(tmpdir(), "factory-startup-")); // before the db module opens it
-const { db } = await import("./db");
+const { db, HOME } = await import("./db");
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const addRunning = (id: string, pid: number | null) =>
@@ -21,7 +21,7 @@ test("a daemon that cannot bind its port leaves live runs untouched", async () =
 
     const p = Bun.spawnSync({
       cmd: ["bun", join(import.meta.dir, "daemon.ts")],
-      env: { ...process.env, FACTORY_PORT: String(listener.port) },
+      env: { ...process.env, FACTORY_PORT: String(listener.port), FACTORY_HOME: HOME }, // full-suite runs share one process: later test files have overwritten FACTORY_HOME by now
       stdout: "pipe", stderr: "pipe", windowsHide: true,
     });
 
@@ -46,10 +46,10 @@ test("a daemon that binds its port still recovers stale runs", async () => {
     port = free.port;
     free.stop(true);
     p = Bun.spawn(["bun", join(import.meta.dir, "daemon.ts")], {
-      env: { ...process.env, FACTORY_PORT: String(port) }, stdout: "ignore", stderr: "pipe", windowsHide: true,
+      env: { ...process.env, FACTORY_PORT: String(port), FACTORY_HOME: HOME }, stdout: "ignore", stderr: "pipe", windowsHide: true,
     });
     const errText = new Response(p.stderr as ReadableStream<Uint8Array>).text();
-    for (let i = 0; i < 200 && !up; i++) { up = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.ok, () => false); if (!up) await Bun.sleep(50); }
+    for (let i = 0; i < 200 && !up; i++) { up = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json() as Promise<{ pid: number }>).then((h) => h.pid === p!.pid, () => false); if (!up) await Bun.sleep(50); }
     if (up) break;
     const err = await Promise.race([errText, Bun.sleep(3000).then(() => "")]);
     if (attempt === 1 || !err.includes("EADDRINUSE")) break;
