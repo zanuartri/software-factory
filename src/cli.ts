@@ -22,10 +22,13 @@ const asJson = !!flags.json;
 const out = (human: string, data?: unknown) => console.log(asJson && data !== undefined ? JSON.stringify(data, null, 2) : human);
 const die = (msg: string): never => { console.error(`factory: ${msg}`); process.exit(1); };
 
-async function alive() {
-  return fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok).catch(() => false);
+async function alive(ms = 3000) {
+  return fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(ms) }).then((r) => r.ok).catch(() => false);
 }
-const portHeld = () => Bun.connect({ hostname: "127.0.0.1", port: PORT, socket: { data() {}, open(s) { s.end(); } } }).then(() => true, () => false);
+const portHeld = () => Promise.race([
+  Bun.connect({ hostname: "127.0.0.1", port: PORT, socket: { data() {}, open(s) { s.end(); } } }).then(() => true, () => false),
+  Bun.sleep(2000).then(() => false),
+]);
 async function up() {
   if (await alive()) return;
   await Bun.sleep(500);
@@ -35,7 +38,8 @@ async function up() {
   const log = openSync(join(HOME, "daemon.log"), "a");
   const p = Bun.spawn(["bun", join(ROOT, "src", "daemon.ts")], { stdio: ["ignore", log, log], detached: true, cwd: ROOT, windowsHide: true });
   p.unref();
-  for (let i = 0; i < 40; i++) { if (await alive()) return; await Bun.sleep(250); }
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) { if (await alive(500)) return; await Bun.sleep(250); }
   if (await portHeld()) die(`port ${PORT} is in use but the factory daemon is not answering — find the holder with \`${process.platform === "win32" ? `netstat -ano | findstr :${PORT}` : `lsof -i :${PORT}`}\` and stop the process holding it (or free the port); see ${join(HOME, "daemon.log")}`);
   die(`daemon did not start; see ${join(HOME, "daemon.log")}`);
 }

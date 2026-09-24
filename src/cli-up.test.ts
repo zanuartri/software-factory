@@ -24,16 +24,36 @@ test("up() diagnoses a port held by a non-daemon listener", async () => {
   try {
     const env: Record<string, string | undefined> = { ...process.env, FACTORY_PORT: String(listener.port), FACTORY_HOME: home };
     delete env.FACTORY_RUN_ID;
+    const t0 = performance.now();
     const p = Bun.spawnSync({
       cmd: ["bun", join(import.meta.dir, "cli.ts"), "status"],
       env, stdout: "pipe", stderr: "pipe", windowsHide: true,
     });
+    const elapsed = performance.now() - t0;
     const log = p.stderr.toString() + p.stdout.toString();
     expect(p.exitCode).toBe(1);
     expect(log).toContain("is in use but the factory daemon is not answering");
     expect(log).toContain(process.platform === "win32" ? `netstat -ano | findstr :${listener.port}` : `lsof -i :${listener.port}`);
     expect(log).toContain("and stop the process holding it");
+    expect(elapsed).toBeLessThan(20000);
   } finally {
     listener.stop(true);
   }
-}, 180000); // up() polls a silent listener 40x, and each /health probe eats its full 3s timeout
+}, 30000); // silent listener: two 3s checks + a ~10s poll budget, then portHeld() confirms and up() dies — ~16s, not the old ~130s
+
+test("up() starts a daemon and reports it", async () => {
+  const home = mkdtempSync(join(tmpdir(), "factory-up-"));
+  const port = freePort();
+  const env: Record<string, string | undefined> = { ...process.env, FACTORY_PORT: port, FACTORY_HOME: home };
+  delete env.FACTORY_RUN_ID;
+  try {
+    const p = Bun.spawnSync({
+      cmd: ["bun", join(import.meta.dir, "cli.ts"), "up"],
+      env, stdout: "pipe", stderr: "pipe", windowsHide: true,
+    });
+    expect(p.exitCode).toBe(0);
+    expect(p.stdout.toString()).toContain(`factoryd up at http://127.0.0.1:${port}`);
+  } finally {
+    await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST" }).catch(() => {});
+  }
+}, 30000);
