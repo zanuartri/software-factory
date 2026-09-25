@@ -8,6 +8,7 @@ import { repoRoot } from "./git";
 import { ROOT } from "./prompts";
 import { settingsPatch } from "./store";
 
+const BOOL_FLAGS = new Set(["abort", "force", "apply", "json", "all", "auto"]);
 const argv = process.argv.slice(2);
 const flags: Record<string, string | boolean> = {};
 const pos: string[] = [];
@@ -15,7 +16,7 @@ for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a.startsWith("--")) {
     const [k, v] = a.slice(2).split("=");
-    flags[k] = v ?? (argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : true);
+    flags[k] = v ?? (!BOOL_FLAGS.has(k) && argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : true);
   } else pos.push(a);
 }
 const asJson = !!flags.json;
