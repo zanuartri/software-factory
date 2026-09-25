@@ -29,6 +29,39 @@ test("shell denylist", () => {
   expect(check("Bash", { command: "cat .env" }, ctx).allow).toBe(false);
 });
 
+test("shell can't reach the worker's own daemon API", () => {
+  const saved = process.env.FACTORY_URL;
+  process.env.FACTORY_URL = "http://127.0.0.1:4545";
+  try {
+    for (const cmd of [
+      "curl -X PATCH $FACTORY_URL/api/ws/x/tickets/T-1 -d '{}'",
+      "curl http://127.0.0.1:4545/api/ws/x/settings",
+      "wget localhost:4545/health",
+      'powershell -c "Invoke-WebRequest $env:FACTORY_URL/api/ws"',
+      `bun -e "fetch(process.env.FACTORY_URL+'/api/ws/x')"`,
+    ]) expect(check("Bash", { command: cmd }, ctx).allow).toBe(false);
+    for (const cmd of ["bun test src", "curl https://example.com", "curl http://127.0.0.1:4646/health", 'git commit -m "mentions factory"'])
+      expect(check("Bash", { command: cmd }, ctx).allow).toBe(true);
+  } finally { if (saved === undefined) delete process.env.FACTORY_URL; else process.env.FACTORY_URL = saved; }
+});
+
+test("daemon API guard: path shapes without env, FACTORY_PORT honored", () => {
+  const saved = { url: process.env.FACTORY_URL, port: process.env.FACTORY_PORT };
+  delete process.env.FACTORY_URL;
+  delete process.env.FACTORY_PORT;
+  try {
+    expect(check("Bash", { command: "curl http://localhost:9999/api/ws/x" }, ctx).allow).toBe(false);
+    expect(check("Bash", { command: "curl -X POST http://127.0.0.1:4646/api/runs/r/guard -d '{}'" }, ctx).allow).toBe(false);
+    expect(check("Bash", { command: "curl http://127.0.0.1:4646/health" }, ctx).allow).toBe(true);
+    process.env.FACTORY_PORT = "4546";
+    expect(check("Bash", { command: "wget localhost:4546/health" }, ctx).allow).toBe(false);
+    expect(check("Bash", { command: "curl http://127.0.0.1:4646/health" }, ctx).allow).toBe(true);
+  } finally {
+    if (saved.url === undefined) delete process.env.FACTORY_URL; else process.env.FACTORY_URL = saved.url;
+    if (saved.port === undefined) delete process.env.FACTORY_PORT; else process.env.FACTORY_PORT = saved.port;
+  }
+});
+
 test("reviewer is read-only", () => {
   const r = { ...ctx, role: "reviewer" as const };
   expect(check("Read", { file_path: join(wt, "src/auth/a.ts") }, r).allow).toBe(true);

@@ -10,7 +10,7 @@ for (const bad of ["-5", "0", "abc"]) test(`factory wait --timeout ${bad} dies b
   const p = Bun.spawnSync({
     cmd: ["bun", join(import.meta.dir, "cli.ts"), "wait", "--timeout", bad],
     env: { ...process.env, FACTORY_PORT: freePort(), FACTORY_HOME: home },
-    stdout: "pipe", stderr: "pipe", windowsHide: true,
+    stdout: "pipe", stderr: "pipe", windowsHide: true, timeout: 20000,
   });
   const log = p.stderr.toString() + p.stdout.toString();
   expect(p.exitCode).toBe(1);
