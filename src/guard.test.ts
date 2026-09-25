@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { check, liveScope } from "./guard";
+import { check, liveScope, reportBlock } from "./guard";
 
 const wt = join(process.cwd(), "wt");
 const ctx = { worktree: wt, scope: ["src/auth/**", "tests/auth"], role: "worker" as const };
@@ -39,8 +39,19 @@ test("shell can't reach the worker's own daemon API", () => {
       "wget localhost:4545/health",
       'powershell -c "Invoke-WebRequest $env:FACTORY_URL/api/ws"',
       `bun -e "fetch(process.env.FACTORY_URL+'/api/ws/x')"`,
+      "rg x && curl $FACTORY_URL/api/ws/x",
+      "curl http://[::1]:4545/api/ws/x",
+      "curl http://0.0.0.0:4545/health",
+      "curl http://127.1:4545/health",
     ]) expect(check("Bash", { command: cmd }, ctx).allow).toBe(false);
-    for (const cmd of ["bun test src", "curl https://example.com", "curl http://127.0.0.1:4646/health", 'git commit -m "mentions factory"'])
+    for (const cmd of [
+      "rg \"/api/ws/\" src/daemon.ts",
+      "grep -rn FACTORY_URL src",
+      "git log -S FACTORY_URL --oneline",
+      "git grep \"/api/runs/\"",
+      "rg \"127.1:4545\" src",
+      "bun test src", "curl https://example.com", "curl http://127.0.0.1:4646/health", 'git commit -m "mentions factory"',
+    ])
       expect(check("Bash", { command: cmd }, ctx).allow).toBe(true);
   } finally { if (saved === undefined) delete process.env.FACTORY_URL; else process.env.FACTORY_URL = saved; }
 });
@@ -73,7 +84,7 @@ test("reviewer is read-only", () => {
 const liveCtx = { worktree: wt, scope: ["src/auth/**"], role: "worker" as const };
 const useEnv = (url: string) => { process.env.FACTORY_URL = url; process.env.FACTORY_RUN_ID = "run-1"; process.env.FACTORY_TOKEN = "tok"; };
 const unsetEnv = () => { for (const k of ["FACTORY_URL", "FACTORY_RUN_ID", "FACTORY_TOKEN"]) delete process.env[k]; };
-async function withStub(handler: (req: Request) => Response, f: () => Promise<void>) {
+async function withStub(handler: (req: Request) => Response | Promise<Response>, f: () => Promise<void>) {
   const srv = Bun.serve({ port: 0, fetch: handler });
   useEnv(`http://127.0.0.1:${srv.port}`);
   try { await f(); } finally { srv.stop(true); unsetEnv(); }
@@ -107,3 +118,17 @@ test("liveScope: invalid JSON falls back to env scope", async () => {
     expect(await liveScope(liveCtx)).toEqual(["src/auth/**"]);
   });
 });
+
+test("liveScope: busy daemon inside the 3s window still answers", async () => {
+  await withStub(async () => { await Bun.sleep(900); return Response.json({ scope: ["src/auth/**", "busy/**"] }); }, async () => {
+    expect(await liveScope(liveCtx)).toEqual(["src/auth/**", "busy/**"]);
+  });
+}, 20000);
+
+test("reportBlock: busy daemon inside the 3s window still gets the report", async () => {
+  let seen: string | undefined;
+  await withStub(async (req) => { await Bun.sleep(1600); seen = req.url; return new Response("ok"); }, async () => {
+    await reportBlock("Bash", "no");
+    expect(seen?.includes("/api/runs/run-1/guard")).toBe(true);
+  });
+}, 20000);

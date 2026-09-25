@@ -7,6 +7,11 @@ export type Verdict = { allow: true } | { allow: false; reason: string };
 
 const SECRET = /(^|[\\/])(\.env(\..*)?|id_rsa[^\\/]*|\.ssh|\.aws|\.npmrc|auth\.json|credentials(\.json)?|factory\.db)$/i;
 const API_WHY = "the factory daemon API is off-limits from the shell; use the factory tools";
+const API_RE = /FACTORY_URL|\/api\/(ws|runs)\//;
+// read-only source searches may mention daemon strings; any HTTP client in the command voids the exemption
+const SEARCH = /\b(?:rg|grep|git\s+grep|git\s+log|findstr|select-string)\b/i;
+const HTTP_CLIENT = /\b(?:curl|wget|invoke-webrequest|iwr|invoke-restmethod|irm)\b|fetch\(|https?\.get|\bnc\s|\bncat\b/i;
+const API_HOSTS = ["127.0.0.1", "localhost", "[::1]", "0.0.0.0", "127.1"];
 const SHELL_DENY: [RegExp, string][] = [
   [/\bgit\s+push\b/, "pushing is done by the factory after review"],
   [/\bgit\s+(rebase|worktree|switch)\b|\bgit\s+checkout\s+-b\b|\bgit\s+branch\s+-[dD]\b/, "branch/worktree management belongs to the daemon"],
@@ -14,7 +19,6 @@ const SHELL_DENY: [RegExp, string][] = [
   [/\bgh\s+(pr\s+merge|release|repo\s+delete)\b|\bnpm\s+publish\b|\bbun\s+publish\b/, "publishing/merging is not a worker action"],
   [/\bsudo\b|\|\s*(sh|bash|pwsh|powershell)\b/, "privilege escalation / pipe-to-shell is forbidden"],
   [/\brm\s+-[a-z]*r[a-z]*f?\s+(\/|~|\.\.|[A-Za-z]:[\\/])(\s|$)/, "recursive delete outside the worktree"],
-  [/FACTORY_URL|\/api\/(ws|runs)\//, API_WHY],
 ];
 
 export function kind(tool: string): "write" | "shell" | "read" | "other" {
@@ -74,8 +78,11 @@ export function check(tool: string, input: any, ctx: GuardCtx): Verdict {
     const cmd = String(input?.command ?? input?.cmd ?? "");
     for (const [re, why] of SHELL_DENY) if (re.test(cmd)) return deny(why);
     const url = process.env.FACTORY_URL, ports = new Set([process.env.FACTORY_PORT]);
-    if (url) { if (cmd.includes(url)) return deny(API_WHY); try { ports.add(new URL(url).port); } catch {} }
-    for (const p of ports) if (p && (cmd.includes(`127.0.0.1:${p}`) || cmd.includes(`localhost:${p}`))) return deny(API_WHY);
+    try { if (url) ports.add(new URL(url).port); } catch {}
+    if (!(SEARCH.test(cmd) && !HTTP_CLIENT.test(cmd))) {
+      if (API_RE.test(cmd) || (url && cmd.includes(url))) return deny(API_WHY);
+      for (const p of ports) if (p && API_HOSTS.some((h) => cmd.includes(`${h}:${p}`))) return deny(API_WHY);
+    }
     if (ctx.role === "reviewer" && /\bgit\s+(commit|add|reset|stash|merge)\b|>\s*[^&|]/.test(cmd)) return deny("reviewers are read-only");
     if (cmd.split(/\s+/).some((w) => SECRET.test(w.replace(/["']/g, "")))) return deny("command touches a secret-looking path");
     return { allow: true };
@@ -97,7 +104,7 @@ export async function liveScope(ctx: GuardCtx): Promise<string[]> {
   const url = process.env.FACTORY_URL, run = process.env.FACTORY_RUN_ID, token = process.env.FACTORY_TOKEN;
   if (!url || !run) return ctx.scope;
   try {
-    const res = await fetch(`${url}/api/runs/${run}/scope`, { headers: { "x-factory-token": token ?? "" }, signal: AbortSignal.timeout(800) });
+    const res = await fetch(`${url}/api/runs/${run}/scope`, { headers: { "x-factory-token": token ?? "" }, signal: AbortSignal.timeout(3000) });
     if (!res.ok) return ctx.scope;
     const d = (await res.json()) as { scope?: unknown };
     return Array.isArray(d.scope) && d.scope.every((s) => typeof s === "string") ? d.scope : ctx.scope;
@@ -114,6 +121,6 @@ export async function reportBlock(tool: string, reason: string) {
   if (!url || !run) return;
   await fetch(`${url}/api/runs/${run}/guard`, {
     method: "POST", headers: { "content-type": "application/json", "x-factory-token": token ?? "" },
-    body: JSON.stringify({ tool, reason }), signal: AbortSignal.timeout(1500),
+    body: JSON.stringify({ tool, reason }), signal: AbortSignal.timeout(3000),
   }).catch(() => {});
 }
