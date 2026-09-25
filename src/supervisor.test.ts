@@ -100,6 +100,34 @@ test("pickWorker: a ui tag requires the ui cap", () => {
   expect(pickWorker(s, mkTicket({ tags: ["ui"] }), [])).toEqual({ harness: "pi", model: "hy3" });
 });
 
+test("pickWorker: a high-difficulty retry (minQuality 5) takes the best free pair, not the default harness", () => {
+  const s = structuredClone(DEFAULT_SETTINGS);
+  s.harnesses.opencode.enabled = true;
+  s.harnesses.commandcode.enabled = true;
+  s.catalog = {
+    "commandcode:retry-cheap": { cost: 1, quality: 3, family: "a" },
+    "opencode:retry-best": { cost: 9, quality: 4, family: "b" },
+  };
+  expect(pickWorker(s, mkTicket({ difficulty: "high" }), [], 2)).toEqual({ harness: "opencode", model: "retry-best" });
+});
+
+test("pickWorker: the quality fallback never picks a max:0 (reviewer-only) harness", () => {
+  const s = structuredClone(DEFAULT_SETTINGS);
+  s.harnesses.commandcode.enabled = true;
+  (s.harnesses.pi as any).max = 0; // highest quality, but not free
+  s.catalog = {
+    "pi:max0-best": { cost: 1, quality: 5, family: "a" },
+    "commandcode:fallback-ok": { cost: 1, quality: 2, family: "b" },
+  };
+  expect(pickWorker(s, mkTicket({ difficulty: "high" }), [], 2)).toEqual({ harness: "commandcode", model: "fallback-ok" });
+});
+
+test("pickWorker: a ui tag falls back to the default harness when no free pair has the ui cap", () => {
+  const s = settingsWithCatalog();
+  (s.harnesses.pi as any).max = 0; // the only ui-capable pair sits on a reviewer-only harness
+  expect(pickWorker(s, mkTicket({ tags: ["ui"] }), [])).toEqual({ harness: "claude", model: "sonnet" });
+});
+
 test("pickWorker: an explicit ticket harness/model wins", () => {
   const s = settingsWithCatalog();
   expect(pickWorker(s, mkTicket({ harness: "claude", model: "opus" }), [])).toEqual({ harness: "claude", model: "opus" });

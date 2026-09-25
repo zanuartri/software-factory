@@ -147,7 +147,8 @@ let pickSeq = 0;
 const lastPicked = new Map<string, number>(); // catalog key → seq, for round-robin among equal-cost ties
 
 /** Cheapest catalog pair that meets the ticket's difficulty (escalated per retry) and tag-driven caps.
- *  Falls back to today's pickHarness + model logic when the catalog is empty or nothing qualifies. */
+ *  Nothing qualifying is no reason to downgrade: with a catalog, the best free pair that satisfies the caps wins;
+ *  only an empty catalog (or no free caps-satisfying pair at all) falls back to today's pickHarness + model logic. */
 export function pickWorker(s: store.Settings, t: store.Ticket, running: Run[], attempt = 1): { harness: Harness; model: string } | null {
   const enabled = (h: Harness) => s.harnesses[h]?.enabled;
   const free = (h: Harness) => running.filter((r) => r.role === "worker" && r.harness === h && r.status !== "idle" && r.status !== "paused").length < ((s.harnesses[h] as any).max ?? s.max_workers);
@@ -159,12 +160,19 @@ export function pickWorker(s: store.Settings, t: store.Ticket, running: Run[], a
   const allCaps = new Set(Object.values(s.catalog).flatMap((c) => c.caps ?? []));
   const requiredCaps = t.tags.filter((tag) => allCaps.has(tag));
   const activeCount = (h: Harness) => running.filter((r) => r.role === "worker" && r.harness === h && r.status !== "idle" && r.status !== "paused").length;
-  const candidates = Object.entries(s.catalog)
-    .map(([key, c]) => ({ key, ...c, harness: key.slice(0, key.indexOf(":")) as Harness, model: key.slice(key.indexOf(":") + 1) }))
-    .filter((c) => enabled(c.harness) && free(c.harness) && effectiveQuality(c.key, c.quality) >= minQuality && requiredCaps.every((tag) => (c.caps ?? []).includes(tag)));
+  const pairs = Object.entries(s.catalog)
+    .map(([key, c]) => ({ key, ...c, harness: key.slice(0, key.indexOf(":")) as Harness, model: key.slice(key.indexOf(":") + 1), quality: effectiveQuality(key, c.quality) }))
+    .filter((c) => enabled(c.harness) && free(c.harness) && requiredCaps.every((tag) => (c.caps ?? []).includes(tag)));
+  const candidates = pairs.filter((c) => c.quality >= minQuality);
   if (candidates.length) {
     candidates.sort((a, b) => a.cost - b.cost || activeCount(a.harness) - activeCount(b.harness) || (lastPicked.get(a.key) ?? 0) - (lastPicked.get(b.key) ?? 0));
     const pick = candidates[0];
+    lastPicked.set(pick.key, ++pickSeq);
+    return { harness: pick.harness, model: pick.model };
+  }
+  if (pairs.length) { // escalated past every pair's quality: take the best free one instead of dropping to the harness default
+    pairs.sort((a, b) => b.quality - a.quality || a.cost - b.cost);
+    const pick = pairs[0];
     lastPicked.set(pick.key, ++pickSeq);
     return { harness: pick.harness, model: pick.model };
   }
