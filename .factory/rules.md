@@ -18,3 +18,4 @@
 16. Commits: conventional style `type(scope): summary` (feat, fix, polish, chore), lowercase, imperative.
 17. Tests that spawn `daemon.ts` or `cli.ts`: temp `FACTORY_HOME` set before imports, a free port, and accept `/health` only when its `pid` is the process you spawned (other suites run in parallel).
 18. A settings/routing change must keep behavior identical when the catalog is empty; say in the Report how you proved it.
+19. Timing assertions and test timeouts must hold on a loaded gate runner (full suite can run ~4× slower than locally): give spawn-based tests an explicit timeout ≥ 20000 and keep elapsed bounds ≥ 2× the documented worst case.
