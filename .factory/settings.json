@@ -2,7 +2,7 @@
   "base_branch": "main",
   "harnesses": {
     "claude": {
-      "enabled": false,
+      "enabled": true,
       "model": "claude-sonnet-5",
       "models": [
         "sonnet",
@@ -10,7 +10,8 @@
         "haiku",
         "claude-opus-5-5",
         "claude-sonnet-5"
-      ]
+      ],
+      "max": 0
     },
     "pi": {
       "enabled": true,

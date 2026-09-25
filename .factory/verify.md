@@ -43,3 +43,6 @@ Save command output to `$T/evidence/` (`init.txt`, `status.txt`, `daemon.log`, s
 | issues | `cli.ts issue new/list/set` | `issue list` shows it; file in `.factory/issues/` |
 | guard (scope/shell) | `src/guard.ts` | `bun test src/guard.test.ts` |
 | console UI | http://127.0.0.1:4646 | page `<title>Factory</title>`; board shows the ticket |
+| model routing | `bun src/cli.ts doctor` → `model catalog` + `cross-family reviewer` lines | source is `repo (N)` / `global (N)` / `none`; reviewer family differs from worker family |
+
+Re-proven 2026-09-25 on main (after T-001..T-020): launch, init, ticket new, status, doctor, UI title, cleanup.

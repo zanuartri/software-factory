@@ -16,3 +16,5 @@
 14. Forbidden paths: `bun.lock`, `ui/bun.lock`, `ui/dist/**`, `node_modules/**`, `.factory/**`, `.env*`.
 15. Changes to `plugin/**` or `harness/**` are prompts/contracts other agents read — edit only when the brief names them.
 16. Commits: conventional style `type(scope): summary` (feat, fix, polish, chore), lowercase, imperative.
+17. Tests that spawn `daemon.ts` or `cli.ts`: temp `FACTORY_HOME` set before imports, a free port, and accept `/health` only when its `pid` is the process you spawned (other suites run in parallel).
+18. A settings/routing change must keep behavior identical when the catalog is empty; say in the Report how you proved it.
