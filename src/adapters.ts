@@ -217,8 +217,11 @@ const commandcode: Adapter = {
     const register = async () => {
       try {
         const rm = await Bun.spawn([...bin("commandcode"), "mcp", "remove", "factory"], { cwd: o.cwd, stdout: "ignore", stderr: "ignore", windowsHide: true }).exited;
+        if (rm !== 0) log(JSON.stringify({ mcp_register: { remove: rm } }));
+      } catch (err) { log(JSON.stringify({ mcp_remove_error: String(err) })); } // a failed remove must not skip the add (T-030)
+      try {
         const add = await Bun.spawn([...bin("commandcode"), "mcp", "add", "--transport", "http", "--scope", "local", "factory", o.mcpUrl], { cwd: o.cwd, stdout: "ignore", stderr: "ignore", windowsHide: true }).exited;
-        if (rm !== 0 || add !== 0) log(JSON.stringify({ mcp_register: { remove: rm, add } }));
+        if (add !== 0) log(JSON.stringify({ mcp_register: { add } }));
       } catch (err) { log(JSON.stringify({ mcp_register_error: String(err) })); } // a failed add must not kill the turn
     };
     const turn = async (text: string) => {
