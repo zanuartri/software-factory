@@ -209,13 +209,20 @@ const opencode: Adapter = {
 const commandcode: Adapter = {
   caps: { liveSteer: false, abort: true, resume: true, oneProcPerTurn: true },
   async start(o) {
-    // async: spawnSync here would freeze the whole daemon for several seconds
-    await Bun.spawn([...bin("commandcode"), "mcp", "remove", "factory"], { cwd: o.cwd, stdout: "ignore", stderr: "ignore", windowsHide: true }).exited;
-    await Bun.spawn([...bin("commandcode"), "mcp", "add", "--transport", "http", "--scope", "local", "factory", o.mcpUrl], { cwd: o.cwd, stdout: "ignore", stderr: "ignore", windowsHide: true }).exited;
     let sid = o.resumeSession ?? null;
     let proc: ReturnType<typeof Bun.spawn> | null = null;
     const log = transcript(o);
-    const turn = (text: string) => {
+    // Re-register before every turn: a resume can otherwise lose the factory MCP server and block the worker (T-020).
+    // async spawns: spawnSync here would freeze the whole daemon for several seconds
+    const register = async () => {
+      try {
+        const rm = await Bun.spawn([...bin("commandcode"), "mcp", "remove", "factory"], { cwd: o.cwd, stdout: "ignore", stderr: "ignore", windowsHide: true }).exited;
+        const add = await Bun.spawn([...bin("commandcode"), "mcp", "add", "--transport", "http", "--scope", "local", "factory", o.mcpUrl], { cwd: o.cwd, stdout: "ignore", stderr: "ignore", windowsHide: true }).exited;
+        if (rm !== 0 || add !== 0) log(JSON.stringify({ mcp_register: { remove: rm, add } }));
+      } catch (err) { log(JSON.stringify({ mcp_register_error: String(err) })); } // a failed add must not kill the turn
+    };
+    const turn = async (text: string) => {
+      await register();
       const args = [...bin("commandcode"), "-p", "--output-format", "json", "--trust", "--skip-onboarding", "--max-turns", "300"];
       if (o.role === "worker") args.push("--yolo"); // guard = PreToolUse hook (installed by `factory setup`) + daemon post-check
       if (o.model) args.push("-m", o.model);
@@ -235,10 +242,10 @@ const commandcode: Adapter = {
       });
       lines(p.stderr, (l) => log(JSON.stringify({ stderr: l })));
     };
-    turn(o.prompt);
+    await turn(o.prompt);
     return {
       get pid() { return proc?.pid ?? null; },
-      async send(text) { if (proc && proc.exitCode === null) { killTree(proc.pid); await proc.exited; } turn(text); },
+      async send(text) { if (proc && proc.exitCode === null) { killTree(proc.pid); await proc.exited; } await turn(text); },
       async abort() { if (proc) { killTree(proc.pid); await proc.exited; } }, // old turn fully stopped before the resume turn starts
       kill() { if (proc) killTree(proc.pid); o.onEvent({ type: "exit", code: null }); },
     };
