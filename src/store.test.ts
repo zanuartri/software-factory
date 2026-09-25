@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const home = mkdtempSync(join(tmpdir(), "factory-store-home-"));
 process.env.FACTORY_HOME = home;
-const { CATALOG_FROM_GLOBAL, DEFAULT_SETTINGS, loadSettings, saveSettings, settingsPatch } = await import("./store");
+const { CATALOG_FROM_GLOBAL, DEFAULT_SETTINGS, loadSettings, readTicket, saveSettings, settingsPatch, updateTicket } = await import("./store");
 
 const CATALOG = {
   "pi:hy3": { cost: 2, quality: 5, family: "pi" },
@@ -21,6 +21,13 @@ const mkRepo = (settings?: object) => {
   return repo;
 };
 const savedRepo = (repo: string) => JSON.parse(readFileSync(join(repo, ".factory", "settings.json"), "utf8"));
+/** A ticket file written by hand so the frontmatter can hold the raw form under test (e.g. `attempts: "1"`). */
+const ticketFile = (repo: string, id: string, extra = "") => {
+  const f = join(repo, ".factory", "tickets", `${id}-x.md`);
+  mkdirSync(join(repo, ".factory", "tickets"), { recursive: true });
+  writeFileSync(f, `---\nid: ${id}\ntitle: x\nstatus: draft\npriority: p2\n${extra}---\n\n## Goal\nG\n`);
+  return f;
+};
 
 test("settingsPatch: JSON form still works", () => {
   expect(settingsPatch(DEFAULT_SETTINGS, ['{"max_workers":5}'])).toEqual({ max_workers: 5 });
@@ -153,4 +160,37 @@ test("loadSettings: a settings save that echoes the inherited catalog back still
   const echo = JSON.parse(JSON.stringify(loadSettings(repo).catalog)); // the UI PUTs the whole GET body back
   saveSettings(repo, { ...loadSettings(repo), catalog: echo });
   expect(savedRepo(repo).catalog).toEqual({});
+});
+
+test("readTicket: a quoted attempts string is read back as a number", () => {
+  expect(readTicket(ticketFile(mkRepo(), "T-001", 'attempts: "1"\n')).attempts).toBe(1);
+  expect(readTicket(ticketFile(mkRepo(), "T-002", 'attempts: "01"\n')).attempts).toBe(1);
+  // supervisor.spawnWorker: (t.attempts ?? 0) + 1 — the "11" bug
+  const t = readTicket(ticketFile(mkRepo(), "T-003", 'attempts: "1"\n'));
+  expect((t.attempts ?? 0) + 1).toBe(2);
+});
+
+test("readTicket: a non-numeric attempts is read back as 0", () => {
+  expect(readTicket(ticketFile(mkRepo(), "T-001", 'attempts: "abc"\n')).attempts).toBe(0);
+});
+
+test("readTicket: an absent attempts stays undefined", () => {
+  expect(readTicket(ticketFile(mkRepo(), "T-001")).attempts).toBeUndefined();
+});
+
+test("updateTicket: a string attempts is written unquoted and read back as a number", () => {
+  const repo = mkRepo();
+  const f = ticketFile(repo, "T-001", "attempts: 0\n");
+  expect(updateTicket(repo, "T-001", { attempts: "2" as any }).attempts).toBe(2);
+  const text = readFileSync(f, "utf8");
+  expect(text).toContain("attempts: 2\n");
+  expect(text).not.toContain('"2"');
+  expect(readTicket(f).attempts).toBe(2);
+});
+
+test("updateTicket: a non-numeric attempts is written as 0", () => {
+  const repo = mkRepo();
+  const f = ticketFile(repo, "T-001", 'attempts: "abc"\n');
+  expect(updateTicket(repo, "T-001", { attempts: "abc" as any }).attempts).toBe(0);
+  expect(readFileSync(f, "utf8")).toContain("attempts: 0\n");
 });

@@ -169,11 +169,15 @@ function listMd(d: string) {
   return existsSync(d) ? readdirSync(d).filter((f) => f.endsWith(".md")).map((f) => join(d, f)) : [];
 }
 
+/** `factory ticket set T-x attempts=1` sends a string, so the frontmatter can hold `attempts: "1"`. Keep it numeric
+ *  in memory and on disk; anything non-numeric (or empty) is 0, matching the `?? 0` the spawn path already assumes. */
+const num = (v: unknown) => Number(v) || 0;
+
 export function readTicket(file: string): Ticket {
   const { fm, body } = parseMd(readFileSync(file, "utf8"));
   return {
     priority: "p2", tags: [], depends_on: [], scope_paths: [], harness: "any", model: "default", difficulty: "medium", status: "draft",
-    ...fm, id: String(fm.id), sections: parseSections(body), file,
+    ...fm, id: String(fm.id), attempts: fm.attempts == null ? undefined : num(fm.attempts), sections: parseSections(body), file,
   };
 }
 export const listTickets = (repo: string) => listMd(dir(repo, "tickets")).map(readTicket).sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
@@ -206,6 +210,7 @@ export function updateTicket(repo: string, id: string, patch: Partial<Ticket>) {
   const t = getTicket(repo, id);
   if (!t) throw new Error(`no ticket ${id}`);
   const next = { ...t, ...patch, sections: { ...t.sections, ...patch.sections }, id: t.id, file: t.file };
+  if (next.attempts != null) next.attempts = num(next.attempts);
   writeTicket(next);
   return next;
 }
