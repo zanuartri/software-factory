@@ -104,6 +104,11 @@ export async function liveScope(ctx: GuardCtx): Promise<string[]> {
   } catch { return ctx.scope; }
 }
 
+/** Only writes read ctx.scope; reads/shell/other keep the spawn-time scope and skip the round trip. */
+export async function scopeFor(tool: string, ctx: GuardCtx): Promise<string[]> {
+  return kind(tool) === "write" ? liveScope(ctx) : ctx.scope;
+}
+
 export async function reportBlock(tool: string, reason: string) {
   const url = process.env.FACTORY_URL, run = process.env.FACTORY_RUN_ID, token = process.env.FACTORY_TOKEN;
   if (!url || !run) return;

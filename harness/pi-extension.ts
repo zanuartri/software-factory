@@ -1,7 +1,7 @@
 // pi bridge: factory tools (same definitions as the MCP server) + guard. Loaded with `pi -e`; no-op outside factory runs.
 import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { check, ctxFromEnv, liveScope, reportBlock } from "../src/guard";
+import { check, ctxFromEnv, reportBlock, scopeFor } from "../src/guard";
 import { TOOLS } from "../src/mcp";
 
 export default function (pi: ExtensionAPI) {
@@ -28,7 +28,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("tool_call", async (event: any) => {
-    const v = check(event.toolName, event.input, { ...ctx, scope: await liveScope(ctx) });
+    const v = check(event.toolName, event.input, { ...ctx, scope: await scopeFor(event.toolName, ctx) });
     if (v.allow) return undefined;
     await reportBlock(event.toolName, v.reason);
     return { block: true, reason: v.reason };
