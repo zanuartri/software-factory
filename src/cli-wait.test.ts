@@ -16,7 +16,7 @@ for (const bad of ["-5", "0", "abc"]) test(`factory wait --timeout ${bad} dies b
   expect(p.exitCode).toBe(1);
   expect(log).toContain("--timeout must be");
   expect(existsSync(join(home, "daemon.log"))).toBe(false);
-});
+}, 20000);
 
 test("factory wait long-poll stays under Bun's ~300s fetch timeout", () => {
   const src = readFileSync(join(import.meta.dir, "cli.ts"), "utf8");

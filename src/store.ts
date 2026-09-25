@@ -177,7 +177,7 @@ export function readTicket(file: string): Ticket {
   const { fm, body } = parseMd(readFileSync(file, "utf8"));
   return {
     priority: "p2", tags: [], depends_on: [], scope_paths: [], harness: "any", model: "default", difficulty: "medium", status: "draft",
-    ...fm, id: String(fm.id), attempts: fm.attempts == null ? undefined : num(fm.attempts), sections: parseSections(body), file,
+    ...fm, id: String(fm.id), attempts: "attempts" in fm ? num(fm.attempts) : undefined, sections: parseSections(body), file,
   };
 }
 export const listTickets = (repo: string) => listMd(dir(repo, "tickets")).map(readTicket).sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
@@ -210,7 +210,7 @@ export function updateTicket(repo: string, id: string, patch: Partial<Ticket>) {
   const t = getTicket(repo, id);
   if (!t) throw new Error(`no ticket ${id}`);
   const next = { ...t, ...patch, sections: { ...t.sections, ...patch.sections }, id: t.id, file: t.file };
-  if (next.attempts != null) next.attempts = num(next.attempts);
+  if ("attempts" in patch) next.attempts = num(next.attempts);
   writeTicket(next);
   return next;
 }

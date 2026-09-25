@@ -178,6 +178,10 @@ test("readTicket: an absent attempts stays undefined", () => {
   expect(readTicket(ticketFile(mkRepo(), "T-001")).attempts).toBeUndefined();
 });
 
+test("readTicket: a present-but-null attempts is read back as 0", () => {
+  expect(readTicket(ticketFile(mkRepo(), "T-001", "attempts: null\n")).attempts).toBe(0);
+});
+
 test("updateTicket: a string attempts is written unquoted and read back as a number", () => {
   const repo = mkRepo();
   const f = ticketFile(repo, "T-001", "attempts: 0\n");
@@ -193,4 +197,14 @@ test("updateTicket: a non-numeric attempts is written as 0", () => {
   const f = ticketFile(repo, "T-001", 'attempts: "abc"\n');
   expect(updateTicket(repo, "T-001", { attempts: "abc" as any }).attempts).toBe(0);
   expect(readFileSync(f, "utf8")).toContain("attempts: 0\n");
+});
+
+test("updateTicket: a null attempts is written as 0", () => {
+  const repo = mkRepo();
+  const f = ticketFile(repo, "T-001", "attempts: 0\n");
+  expect(updateTicket(repo, "T-001", { attempts: null as any }).attempts).toBe(0);
+  const text = readFileSync(f, "utf8");
+  expect(text).toContain("attempts: 0\n");
+  expect(text).not.toContain("attempts: null");
+  expect(readTicket(f).attempts).toBe(0);
 });
