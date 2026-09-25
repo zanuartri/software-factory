@@ -481,14 +481,14 @@ async function gate(workerRunId: string, report: string) {
 
   // 1. structural post-check (works even for harnesses whose guard is weaker)
   // Only committed work is merged, so untracked junk outside scope (harness/tool caches) is ignored on purpose.
-  const dirtyTracked = git.git(r.worktree!, "status", "--porcelain", "--untracked-files=no").out;
-  const untrackedInScope = git.git(r.worktree!, "ls-files", "--others", "--exclude-standard").out.split("\n").filter((f) => f && inScope(f, t.scope_paths));
+  const dirtyTracked = (await git.gitAsync(r.worktree!, "status", "--porcelain", "--untracked-files=no")).out;
+  const untrackedInScope = (await git.gitAsync(r.worktree!, "ls-files", "--others", "--exclude-standard")).out.split("\n").filter((f) => f && inScope(f, t.scope_paths));
   if (dirtyTracked) findings.push(`Uncommitted changes to tracked files:\n${dirtyTracked}\nCommit or revert them before submitting.`);
   if (untrackedInScope.length) findings.push(`Untracked files inside scope were never committed: ${untrackedInScope.join(", ")}. Commit or delete them.`);
-  const committed = git.git(r.worktree!, "diff", "--name-only", `${s.base_branch}...HEAD`).out.split("\n").filter(Boolean);
+  const committed = (await git.gitAsync(r.worktree!, "diff", "--name-only", `${s.base_branch}...HEAD`)).out.split("\n").filter(Boolean);
   const outOfScope = committed.filter((f) => !inScope(f, t.scope_paths));
   if (outOfScope.length) findings.push(`Committed files outside scope_paths ${JSON.stringify(t.scope_paths)}: ${outOfScope.join(", ")}. Revert them or ask to widen scope.`);
-  if (git.remoteRefs(w.path) !== remoteSnap.get(r.id)) findings.push("Remote refs changed during the run — workers must not push.");
+  if ((await git.remoteRefsAsync(w.path)) !== remoteSnap.get(r.id)) findings.push("Remote refs changed during the run — workers must not push.");
   if (!committed.length) findings.push("No committed changes vs base.");
   const structuralOk = !findings.length;
 

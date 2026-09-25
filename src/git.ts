@@ -6,6 +6,12 @@ export function git(cwd: string, ...args: string[]) {
   const p = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe", windowsHide: true });
   return { ok: p.exitCode === 0, out: p.stdout.toString().trim(), err: p.stderr.toString().trim() };
 }
+/** Same shape as git(), but yields the event loop: spawnSync freezes the daemon for tens to hundreds of ms per call. */
+export async function gitAsync(cwd: string, ...args: string[]) {
+  const p = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe", windowsHide: true });
+  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  return { ok: code === 0, out: out.trim(), err: err.trim() };
+}
 const must = (cwd: string, ...args: string[]) => {
   const r = git(cwd, ...args);
   if (!r.ok) throw new Error(`git ${args.join(" ")}: ${r.err || r.out}`);
@@ -81,3 +87,4 @@ export function scratchWorktree(repo: string, sha: string) {
 export const deleteBranch = (repo: string, branch: string) => git(repo, "branch", "-D", branch);
 /** A push updates refs/remotes/*, so a changed snapshot means a worker pushed. */
 export const remoteRefs = (repo: string) => git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes").out;
+export const remoteRefsAsync = async (repo: string) => (await gitAsync(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes")).out;
