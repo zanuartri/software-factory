@@ -1,4 +1,4 @@
-import { ChevronRight, Kanban, List, Plus } from "lucide-react";
+import { ChevronRight, Kanban, List, Search } from "lucide-react";
 import { useState } from "react";
 import { api, useApi, type FEvent, type Ticket, type Workspace } from "./api";
 import { HarnessTag, PageHeader, STATUS_META, StatusChip, StatusIcon } from "./ui";
@@ -16,10 +16,14 @@ function Priority({ p }: { p: string }) {
   );
 }
 
+const Tag = ({ children }: { children: string }) => <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-fg-muted">{children}</span>;
+const gaps = (t: Ticket) => (t.status === "draft" && t.brief_errors.length > 0 ? `${t.brief_errors.length} brief gap${t.brief_errors.length > 1 ? "s" : ""}` : null);
+
 export function Board({ ws, openTicket, toast }: { ws: Workspace; openTicket: (id: string) => void; toast: (m: string) => void }) {
   const tickets = useApi<Ticket[]>(`/api/ws/${ws.id}/tickets`, (e: FEvent) => e.ws === ws.id && /ticket|store|gate|merge/.test(e.type));
   const [over, setOver] = useState<string | null>(null);
-  const [newTitle, setNewTitle] = useState("");
+  const [q, setQ] = useState("");
+  const [doneOpen, setDoneOpen] = useState(false);
   const [view, setView] = useState<"board" | "list">(() => { try { return localStorage.getItem("board-view") === "list" ? "list" : "board"; } catch { return "board"; } });
   const pickView = (v: "board" | "list") => { setView(v); try { localStorage.setItem("board-view", v); } catch {} };
   const dropProps = (c: string) => ({
@@ -28,69 +32,78 @@ export function Board({ ws, openTicket, toast }: { ws: Workspace; openTicket: (i
     onDrop: (e: React.DragEvent) => { setOver(null); const id = e.dataTransfer.getData("text/ticket"); if (id) move(id, c); },
   });
 
+  const all = tickets.data ?? [];
+  const needle = q.trim().toLowerCase();
+  const shown = all.filter((t) => !needle || `${t.id} ${t.title} ${t.tags.join(" ")} ${t.harness}`.toLowerCase().includes(needle));
   const move = async (id: string, status: string) => {
     try { await api(`/api/ws/${ws.id}/tickets/${id}`, { method: "PATCH", body: { status } }); tickets.reload(); }
     catch (e: any) { toast(`Can't move ${id} to ${STATUS_META[status].label}: ${e.message}${e.data?.brief_errors ? "\n• " + e.data.brief_errors.join("\n• ") : ""}`); }
   };
-  const create = async () => {
-    if (!newTitle.trim()) return;
-    const t = await api<Ticket>(`/api/ws/${ws.id}/tickets`, { body: { title: newTitle } });
-    setNewTitle(""); openTicket(t.id);
-  };
-
   return (
     <>
-      <PageHeader title="Board" sub={`${tickets.data?.length ?? 0} tickets`}>
-        <div role="radiogroup" aria-label="view" className="inline-flex rounded-lg border border-border bg-surface p-0.5">
+      <PageHeader title="Board" sub={needle ? `${shown.length} of ${all.length} tickets` : `${all.length} tickets`}>
+        <label className="relative hidden md:block">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-fg-subtle" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" aria-label="filter tickets" className="h-8 w-36 rounded-lg border border-border bg-surface pr-2.5 pl-8 text-[13px] outline-none placeholder:text-fg-subtle focus:border-border-strong lg:w-48" />
+        </label>
+        <div role="radiogroup" aria-label="view" className="inline-flex rounded-lg bg-muted p-0.5">
           {([["board", Kanban, "Board"], ["list", List, "List"]] as const).map(([v, I, label]) => (
-            <button key={v} role="radio" aria-checked={view === v} onClick={() => pickView(v)}
-              className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] transition-colors ${view === v ? "bg-muted font-medium text-fg" : "text-fg-muted hover:text-fg"}`}>
-              <I className="size-3.5" /><span className="hidden md:inline">{label}</span>
+            <button key={v} role="radio" aria-checked={view === v} onClick={() => pickView(v)} title={label}
+              className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] transition-colors ${view === v ? "bg-surface font-medium text-fg shadow-[var(--shadow)]" : "text-fg-muted hover:text-fg"}`}>
+              <I className="size-3.5" /><span className="hidden xl:inline">{label}</span>
             </button>
           ))}
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); create(); }} className="flex items-center gap-1.5">
-          <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="New ticket title…" aria-label="new ticket title"
-            className="h-8 w-36 min-w-0 rounded-lg border border-border bg-surface px-2.5 text-[13px] outline-none placeholder:text-fg-subtle focus:border-border-strong md:w-64" />
-          <button type="submit" className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[13px] font-medium text-primary-fg hover:opacity-90"><Plus className="size-3.5" /><span className="hidden md:inline">New</span></button>
-        </form>
       </PageHeader>
-      {view === "list" ? <ListView tickets={tickets.data ?? []} over={over} dropProps={dropProps} openTicket={openTicket} /> : (
-      <div className="grid min-h-0 flex-1 snap-x auto-cols-[minmax(230px,1fr)] grid-flow-col gap-3 overflow-x-auto p-3 md:p-4">
-        {COLS.map((c) => {
-          const list = (tickets.data ?? []).filter((t) => t.status === c);
-          return (
-            <section key={c} aria-label={STATUS_META[c].label} {...dropProps(c)}
-              className={`flex min-h-0 snap-start flex-col rounded-xl transition-colors ${over === c ? "bg-hover" : "bg-muted/50"}`}>
-              <header className="flex items-center gap-2 px-3 pt-3 pb-2">
+
+      {view === "list" ? <ListView tickets={shown} over={over} dropProps={dropProps} openTicket={openTicket} /> : (
+        <div className="flex min-h-0 flex-1 snap-x gap-3 overflow-x-auto p-3 md:p-4">
+          {COLS.map((c) => {
+            const list = shown.filter((t) => t.status === c);
+            const rail = c === "done" && !doneOpen; // finished work is the bulk of any board: keep it as a thin rail until asked for
+            if (rail) return (
+              <button key={c} {...dropProps(c)} onClick={() => setDoneOpen(true)} aria-label={`${STATUS_META[c].label}, ${list.length} tickets — expand`} title="Show done tickets"
+                className={`flex w-11 shrink-0 snap-start flex-col items-center gap-3 rounded-2xl border py-3.5 text-fg-muted transition-colors hover:text-fg ${over === c ? "border-accent/60 bg-hover" : "border-border bg-bg hover:bg-hover"}`}>
                 <StatusIcon status={c} />
-                <h3 className="text-[13px] font-medium">{STATUS_META[c].label}</h3>
-                <span className="text-[12px] text-fg-subtle tabular-nums">{list.length}</span>
-              </header>
-              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
-                {list.map((t) => (
-                  <article key={t.id} draggable onDragStart={(e) => e.dataTransfer.setData("text/ticket", t.id)} onClick={() => openTicket(t.id)}
-                    className="card cursor-pointer p-3 transition hover:border-border-strong active:cursor-grabbing">
-                    <div className="flex items-center gap-2 text-[12px] text-fg-subtle">
-                      <span className="font-mono">{t.id}</span>
-                      <span className="ml-auto flex items-center gap-2"><StatusChip t={t} /><Priority p={t.priority} /></span>
-                    </div>
-                    <p className="mt-1 text-[13px] leading-snug font-medium">{t.title}</p>
-                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                      <HarnessTag h={t.harness} />
-                      {t.tags.map((g) => <span key={g} className="rounded-md border border-border px-1.5 py-0.5 text-[11px] text-fg-muted">{g}</span>)}
-                      {t.depends_on.length > 0 && <span className="text-[11px] text-fg-subtle">after {t.depends_on.join(", ")}</span>}
-                      {(t.attempts ?? 0) > 1 && <span className="text-[11px] text-warning">attempt {t.attempts}</span>}
-                    </div>
-                    {c === "draft" && t.brief_errors.length > 0 && <p className="mt-2 text-[11px] text-fg-subtle">{t.brief_errors.length} brief gap{t.brief_errors.length > 1 ? "s" : ""}</p>}
-                  </article>
-                ))}
-                {!list.length && <div className="h-16 rounded-lg border border-dashed border-border" aria-hidden />}
-              </div>
-            </section>
-          );
-        })}
-      </div>
+                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums">{list.length}</span>
+                <span className="text-[12.5px] font-semibold [writing-mode:vertical-rl]">{STATUS_META[c].label}</span>
+              </button>
+            );
+            return (
+              <section key={c} aria-label={STATUS_META[c].label} {...dropProps(c)}
+                className={`flex min-h-0 min-w-[184px] flex-1 snap-start basis-0 flex-col rounded-2xl border transition-colors ${over === c ? "border-accent/60 bg-hover" : "border-border bg-bg"}`}>
+                <header className="flex items-center gap-2 px-3.5 pt-3.5 pb-2.5">
+                  <StatusIcon status={c} />
+                  <h3 className="text-[13px] font-semibold">{STATUS_META[c].label}</h3>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-fg-muted tabular-nums">{list.length}</span>
+                  {c === "done" && <button onClick={() => setDoneOpen(false)} title="Collapse" aria-label="Collapse done" className="ml-auto grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-hover hover:text-fg"><ChevronRight className="size-3.5" /></button>}
+                </header>
+                <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-2.5 pb-2.5">
+                  {list.map((t) => (
+                    <article key={t.id} draggable onDragStart={(e) => e.dataTransfer.setData("text/ticket", t.id)} onClick={() => openTicket(t.id)}
+                      className="card cursor-pointer p-3.5 transition hover:border-border-strong hover:shadow-[var(--shadow-lg)] active:cursor-grabbing">
+                      <p className="line-clamp-3 text-[13px] leading-snug font-medium">{t.title}</p>
+                      <div className="mt-2.5 flex items-center gap-2 text-[11.5px] text-fg-subtle">
+                        <span className="font-mono">{t.id}</span>
+                        <HarnessTag h={t.harness} />
+                        <span className="ml-auto flex items-center gap-2"><StatusChip t={t} /><Priority p={t.priority} /></span>
+                      </div>
+                      {(t.tags.length > 0 || t.depends_on.length > 0 || (t.attempts ?? 0) > 1 || gaps(t)) && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {t.tags.map((g) => <Tag key={g}>{g}</Tag>)}
+                          {t.depends_on.length > 0 && <span className="text-[11px] text-fg-subtle">after {t.depends_on.join(", ")}</span>}
+                          {(t.attempts ?? 0) > 1 && <span className="text-[11px] text-warning">attempt {t.attempts}</span>}
+                          {gaps(t) && <span className="text-[11px] text-fg-subtle">{gaps(t)}</span>}
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                  {!list.length && <p className="px-2 py-8 text-center text-[12px] text-fg-subtle">{needle ? "No match" : "Nothing here"}</p>}
+                </div>
+              </section>
+            );
+          })}
+        </div>
       )}
     </>
   );
@@ -98,41 +111,37 @@ export function Board({ ws, openTicket, toast }: { ws: Workspace; openTicket: (i
 
 type DropProps = (c: string) => { onDragOver: (e: React.DragEvent) => void; onDragLeave: () => void; onDrop: (e: React.DragEvent) => void };
 
-/** Linear-style list: grouped by status, collapsible, rows draggable onto another group to change status. */
+/** Same outlined panels as the board lanes, stacked full width; rows draggable onto another group to change status. */
 function ListView({ tickets, over, dropProps, openTicket }: { tickets: Ticket[]; over: string | null; dropProps: DropProps; openTicket: (id: string) => void }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ done: true });
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 md:p-4">
       {COLS.map((c) => {
         const list = tickets.filter((t) => t.status === c);
         const closed = collapsed[c];
         return (
-          <section key={c} aria-label={STATUS_META[c].label} {...dropProps(c)} className={over === c ? "bg-hover" : ""}>
-            <button onClick={() => setCollapsed({ ...collapsed, [c]: !closed })} aria-expanded={!closed}
-              className="sticky top-0 z-10 flex h-9 w-full items-center gap-2 border-b border-border bg-muted px-4 text-left md:px-6">
+          <section key={c} aria-label={STATUS_META[c].label} {...dropProps(c)} className={`overflow-hidden rounded-2xl border transition-colors ${over === c ? "border-accent/60 bg-hover" : "border-border bg-bg"}`}>
+            <button onClick={() => setCollapsed({ ...collapsed, [c]: !closed })} aria-expanded={!closed} className="flex h-11 w-full items-center gap-2 px-3.5 text-left hover:bg-hover">
               <ChevronRight className={`size-3.5 text-fg-subtle transition-transform ${closed ? "" : "rotate-90"}`} />
               <StatusIcon status={c} />
-              <span className="text-[13px] font-medium">{STATUS_META[c].label}</span>
-              <span className="text-[12px] text-fg-subtle tabular-nums">{list.length}</span>
+              <span className="text-[13px] font-semibold">{STATUS_META[c].label}</span>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-fg-muted tabular-nums">{list.length}</span>
             </button>
-            {!closed && list.map((t) => (
+            {!closed && (list.length ? list.map((t) => (
               <div key={t.id} role="button" tabIndex={0} draggable onDragStart={(e) => e.dataTransfer.setData("text/ticket", t.id)}
                 onClick={() => openTicket(t.id)} onKeyDown={(e) => e.key === "Enter" && openTicket(t.id)}
-                className="group flex h-11 cursor-pointer items-center gap-2.5 border-b border-border px-4 transition-colors hover:bg-hover md:gap-3 md:px-6">
-                <span className="grid w-4 place-items-center"><Priority p={t.priority} /></span>
-                <span className="w-12 shrink-0 font-mono text-[12px] text-fg-subtle md:w-14">{t.id}</span>
-                <StatusIcon status={t.status} />
+                className="flex h-11 cursor-pointer items-center gap-3 border-t border-border px-3.5 transition-colors hover:bg-hover">
+                <span className="grid w-4 shrink-0 place-items-center"><Priority p={t.priority} /></span>
+                <span className="w-14 shrink-0 font-mono text-[12px] text-fg-subtle">{t.id}</span>
                 <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{t.title}</span>
                 <StatusChip t={t} />
-                {c === "draft" && t.brief_errors.length > 0 && <span className="text-[11px] text-fg-subtle">{t.brief_errors.length} brief gap{t.brief_errors.length > 1 ? "s" : ""}</span>}
+                {gaps(t) && <span className="hidden text-[11px] text-fg-subtle sm:inline">{gaps(t)}</span>}
                 {(t.attempts ?? 0) > 1 && <span className="text-[11px] text-warning">attempt {t.attempts}</span>}
-                {t.depends_on.length > 0 && <span className="hidden text-[11px] text-fg-subtle lg:inline">after {t.depends_on.join(", ")}</span>}
-                <span className="hidden items-center gap-1 md:flex">
-                  {t.tags.map((g) => <span key={g} className="rounded-md border border-border px-1.5 py-0.5 text-[11px] text-fg-muted">{g}</span>)}
-                </span>
+                {t.depends_on.length > 0 && <span className="hidden text-[11px] text-fg-subtle xl:inline">after {t.depends_on.join(", ")}</span>}
+                <span className="hidden items-center gap-1 lg:flex">{t.tags.map((g) => <Tag key={g}>{g}</Tag>)}</span>
                 <HarnessTag h={t.harness} />
               </div>
-            ))}
+            )) : <p className="border-t border-border px-3.5 py-3 text-[12px] text-fg-subtle">Nothing here</p>)}
           </section>
         );
       })}

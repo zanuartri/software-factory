@@ -38,7 +38,13 @@ export function describe(e: FEvent): { text: string; tone: Tone } {
     case "merge.done": return { text: `${t} merged ${d.sha?.slice(0, 7)}`, tone: "success" };
     case "merge.reverted": return { text: `${t} auto-reverted after base verify failed`, tone: "danger" };
     case "merge.conflict": return { text: `${t} conflicts in ${d.files?.join(", ")}`, tone: "warning" };
-    default: return { text: `${e.type} ${t}`, tone: "subtle" };
+    case "manager.attached": case "coordinator.attached": return { text: `Manager session ${String(d.session ?? "").slice(0, 8)} attached`, tone: "muted" };
+    case "issue.created": return { text: `Issue ${d.id} filed`, tone: "muted" };
+    case "ticket.created": return { text: `${t || d.id} created`, tone: "muted" };
+    case "merge.landed": return { text: `${t} landed on the base branch`, tone: "success" };
+    case "settings.changed": return { text: "Settings changed", tone: "subtle" };
+    case "gc": return { text: "Cleaned up merged worktrees", tone: "subtle" };
+    default: return { text: `${e.type} ${t}`.trim(), tone: "subtle" };
   }
 }
 const TONE: Record<Tone, string> = { success: "var(--success)", danger: "var(--danger)", warning: "var(--warning)", accent: "var(--accent)", muted: "var(--fg-muted)", subtle: "var(--border-strong)" };
@@ -64,7 +70,7 @@ export function Floor({ ws, openTicket, openBoard, toast }: { ws: Workspace; ope
   const count = (s: Ticket["status"]) => (tickets.data ?? []).filter((t) => t.status === s).length;
   const attention = (tickets.data ?? []).filter((t) => t.blocked || t.failed || t.status === "in_review");
   const plan = info.data?.plan;
-  const visibleFeed = feed.filter((e) => e.type !== "run.text" && e.type !== "store.changed" && (showTools || e.type !== "run.tool")).slice(-150).reverse();
+  const visibleFeed = feed.filter((e) => e.type !== "run.text" && e.type !== "store.changed" && e.type !== "merge.landed" && (showTools || e.type !== "run.tool")).slice(-150).reverse();
 
   return (
     <>
@@ -76,25 +82,28 @@ export function Floor({ ws, openTicket, openBoard, toast }: { ws: Workspace; ope
       </PageHeader>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-[1fr_360px] xl:overflow-hidden">
-        <div className="space-y-6 px-4 py-4 md:space-y-8 md:px-6 md:py-6 xl:min-h-0 xl:overflow-y-auto">
-          <button onClick={openBoard} title="Open board" className="-mx-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg px-1.5 py-1 text-[13px] text-fg-muted transition-colors hover:bg-hover">
-            {(["draft", "open", "in_progress", "in_review", "done"] as const).filter((s) => count(s) > 0).map((s) => (
-              <span key={s} className="inline-flex items-center gap-1.5">
-                <StatusIcon status={s} size={12} /><span className="font-medium text-fg tabular-nums">{count(s)}</span>{STATUS_META[s].label.toLowerCase()}
+        <div className="space-y-3 p-3 md:p-4 xl:min-h-0 xl:overflow-y-auto">
+          <button onClick={openBoard} title="Open board" className="grid w-full grid-cols-3 gap-2 text-left sm:grid-cols-5">
+            {(["draft", "open", "in_progress", "in_review", "done"] as const).map((st) => (
+              <span key={st} className="flex items-center gap-2.5 rounded-2xl border border-border bg-bg px-3.5 py-3 transition-colors hover:bg-hover">
+                <StatusIcon status={st} size={15} />
+                <span className="min-w-0">
+                  <span className="block text-[18px] leading-none font-semibold tabular-nums">{count(st)}</span>
+                  <span className="mt-1 block truncate text-[11.5px] text-fg-subtle">{STATUS_META[st].label}</span>
+                </span>
               </span>
             ))}
-            {!(tickets.data ?? []).length && <span>No tickets yet — plan some with /factory:plan</span>}
           </button>
 
           {/* workers */}
-          <section>
-            <h2 className="mb-3 text-[13px] font-medium text-fg-muted">Active workers</h2>
+          <section className="rounded-2xl border border-border bg-bg p-3.5">
+            <h2 className="mb-3 flex items-center gap-2 text-[13px] font-semibold">Active workers <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-fg-muted tabular-nums">{workers.length}/{slots}</span></h2>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3">
               {workers.map((r) => (
                 <WorkerCard key={r.id} run={r} ticket={byId.get(r.ticket)} reviewer={reviewers.find((x) => x.parent === r.id)} tools={feed.filter((e) => e.run === r.id && e.type === "run.tool").slice(-3)} openTicket={openTicket} toast={toast} />
               ))}
               {slots > workers.length && (
-                <div className="col-span-full flex h-11 items-center justify-center gap-2 rounded-[10px] border border-dashed border-border text-[12.5px] text-fg-subtle">
+                <div className="col-span-full flex h-14 items-center justify-center gap-2 rounded-xl border border-dashed border-border text-[12.5px] text-fg-subtle">
                   {slots - workers.length} idle slot{slots - workers.length > 1 ? "s" : ""}{!workers.length && " — run open tickets to start workers"}
                 </div>
               )}
@@ -102,9 +111,9 @@ export function Floor({ ws, openTicket, openBoard, toast }: { ws: Workspace; ope
           </section>
 
           {attention.length > 0 && (
-            <section>
-              <h2 className="mb-3 text-[13px] font-medium text-fg-muted">Needs attention</h2>
-              <div className="card divide-y divide-border overflow-hidden">
+            <section className="overflow-hidden rounded-2xl border border-border bg-bg">
+              <h2 className="flex items-center gap-2 px-3.5 pt-3.5 pb-2 text-[13px] font-semibold">Needs attention <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-fg-muted tabular-nums">{attention.length}</span></h2>
+              <div className="divide-y divide-border border-t border-border">
                 {attention.map((t) => (
                   <button key={t.id} onClick={() => openTicket(t.id)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-hover">
                     <StatusIcon status={t.status} />
@@ -120,19 +129,19 @@ export function Floor({ ws, openTicket, openBoard, toast }: { ws: Workspace; ope
         </div>
 
         {/* right column */}
-        <aside className="flex flex-col border-t xl:min-h-0 border-border bg-bg xl:border-t-0 xl:border-l">
+        <aside className="flex flex-col gap-3 p-3 pt-0 md:p-4 md:pt-0 xl:min-h-0 xl:pt-4 xl:pl-0">
           {pending.length > 0 && (
-            <section className="border-b border-border p-4 xl:max-h-[50%] xl:min-h-0 xl:overflow-y-auto">
+            <section className="rounded-2xl border border-border bg-bg p-3.5 xl:max-h-[50%] xl:min-h-0 xl:shrink-0 xl:overflow-y-auto">
               <h2 className="mb-3 flex items-center gap-2 text-[13px] font-medium">Questions <Badge tone="warning">{pending.length}</Badge></h2>
               <div className="space-y-3">{pending.map((a) => <AskCard key={a.id} a={a} toast={toast} />)}</div>
             </section>
           )}
-          <section className="flex min-h-0 flex-1 flex-col">
-            <div className="flex items-center px-4 pt-4 pb-2">
-              <h2 className="text-[13px] font-medium">Activity</h2>
+          <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-bg">
+            <div className="flex items-center px-3.5 pt-3.5 pb-2">
+              <h2 className="text-[13px] font-semibold">Activity</h2>
               <span className="ml-auto"><Checkbox checked={showTools} onChange={setShowTools} label="Tool calls" /></span>
             </div>
-            <ol className="max-h-[480px] min-h-0 flex-1 overflow-y-auto px-4 pb-4 xl:max-h-none">
+            <ol className="max-h-[480px] min-h-0 flex-1 overflow-y-auto px-3.5 pb-3.5 xl:max-h-none">
               {visibleFeed.map((e) => {
                 const d = describe(e);
                 return (

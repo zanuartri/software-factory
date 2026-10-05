@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { Bot, CircleDot, Kanban, MessageSquare, PanelLeftOpen, ScrollText, Settings2 } from "lucide-react";
+import { Bot, CircleDot, Kanban, PanelLeftOpen, ScrollText, Settings2 } from "lucide-react";
 import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useApi, useConnected, type Workspace } from "./api";
@@ -13,8 +13,8 @@ import { Select } from "./select";
 import { Dot, ThemeToggle, Toast } from "./ui";
 
 const VIEWS = [
-  { id: "floor", label: "Workers", icon: Bot },
   { id: "board", label: "Board", icon: Kanban },
+  { id: "floor", label: "Workers", icon: Bot },
   { id: "issues", label: "Issues", icon: CircleDot },
   { id: "rules", label: "Rules", icon: ScrollText },
   { id: "settings", label: "Settings", icon: Settings2 },
@@ -23,11 +23,25 @@ type View = (typeof VIEWS)[number]["id"];
 
 /** #/<ws>/<view>[/<ticket>] */
 function useRoute() {
-  const parse = () => { const [ws, view, ticket] = location.hash.replace(/^#\/?/, "").split("/"); return { ws: ws || null, view: (view || "floor") as View, ticket: ticket || null }; };
+  const parse = () => { const [ws, view, ticket] = location.hash.replace(/^#\/?/, "").split("/"); return { ws: ws || null, view: (view || "board") as View, ticket: ticket || null }; };
   const [r, setR] = useState(parse);
   useEffect(() => { const f = () => setR(parse()); addEventListener("hashchange", f); return () => removeEventListener("hashchange", f); }, []);
   const go = (p: Partial<typeof r>) => { const n = { ...r, ...p }; location.hash = `/${n.ws ?? ""}/${n.view}${n.ticket ? "/" + n.ticket : ""}`; };
   return [r, go] as const;
+}
+
+/** Tab title + favicon follow the selected workspace: its name, current view, and a dot while a run is active. */
+function useTabIdentity(ws: Workspace | undefined, view: string) {
+  const label = VIEWS.find((v) => v.id === view)?.label ?? "";
+  const active = !!ws?.plan?.active;
+  useEffect(() => {
+    document.title = ws ? `${ws.name} · ${label}` : "Factory";
+    const hue = [...(ws?.id ?? "factory")].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7); // stable per workspace
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="hsl(${hue} 42% 40%)"/><text x="16" y="23" text-anchor="middle" font-family="system-ui,sans-serif" font-size="19" font-weight="700" fill="white">${((ws?.name ?? "F")[0] ?? "F").toUpperCase().replace(/[<>&]/g, "")}</text>${active ? '<circle cx="25" cy="7" r="6" fill="#a78bfa" stroke="white" stroke-width="2"/>' : ""}</svg>`;
+    let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
+    link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  }, [ws?.id, ws?.name, label, active]);
 }
 
 function App() {
@@ -49,12 +63,13 @@ function App() {
   const connected = useConnected();
   const ws = wss.data?.find((w) => w.id === route.ws) ?? wss.data?.[0];
   const openTicket = (ticket: string) => go({ ws: ws?.id, ticket });
+  useTabIdentity(ws, route.view);
 
   return (
     <div className="flex h-full flex-col">
-      <nav className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-bg px-3" aria-label="main">
-        <Select variant="bare" className="w-auto max-w-[220px] shrink-0" ariaLabel="workspace" value={ws?.id ?? ""} onChange={(v) => go({ ws: v, ticket: null })}
-          options={(wss.data ?? []).map((w) => ({ value: w.id, label: w.name, hint: w.path.split(/[\\/]/).slice(-2).join("/") }))}
+      <nav className="flex h-13 shrink-0 items-center gap-3 border-b border-border bg-bg px-3" aria-label="main">
+        <Select variant="bare" className="w-auto max-w-[240px] shrink-0" ariaLabel="workspace" value={ws?.id ?? ""} onChange={(v) => go({ ws: v, ticket: null })}
+          options={(wss.data ?? []).map((w) => ({ value: w.id, label: w.name, hint: w.path.split(/[\/]/).slice(-2).join("/") }))}
           renderValue={() => (
             <span className="flex min-w-0 items-center gap-2" title={ws?.path}>
               <span className="grid size-6 shrink-0 place-items-center rounded-md bg-primary text-[12px] font-semibold text-primary-fg">{(ws?.name ?? "F")[0].toUpperCase()}</span>
@@ -62,21 +77,25 @@ function App() {
             </span>
           )} />
 
-        <div className="ml-1 flex min-w-0 items-center gap-0.5 overflow-x-auto">
-          {VIEWS.map((v) => (
-            <button key={v.id} onClick={() => go({ view: v.id, ticket: null })} aria-current={route.view === v.id ? "page" : undefined} title={v.label} aria-label={v.label}
-              className={`relative flex h-8 shrink-0 items-center gap-2 rounded-lg px-2.5 text-[13px] font-medium transition-colors ${route.view === v.id ? "bg-muted text-fg" : "text-fg-muted hover:bg-hover hover:text-fg"}`}>
-              <v.icon className="size-4" strokeWidth={1.75} />
-              <span className="hidden md:inline">{v.label}</span>
-              {v.id === "floor" && ws?.plan?.active && <Dot on pulse />}
-            </button>
+        {/* work views, then a divider, then configuration */}
+        <div className="flex min-w-0 items-center overflow-x-auto rounded-full bg-muted p-0.5">
+          {VIEWS.map((v, i) => (
+            <div key={v.id} className="flex items-center">
+              {i === 3 && <span className="mx-1 h-4 w-px shrink-0 bg-border-strong" />}
+              <button onClick={() => go({ view: v.id, ticket: null })} aria-current={route.view === v.id ? "page" : undefined} title={v.label} aria-label={v.label}
+                className={`relative flex h-7 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors ${route.view === v.id ? "bg-surface text-fg shadow-[var(--shadow)]" : "text-fg-muted hover:text-fg"}`}>
+                <v.icon className="size-3.5" strokeWidth={1.75} />
+                <span className="hidden md:inline">{v.label}</span>
+                {v.id === "floor" && ws?.plan?.active && <Dot on pulse color="var(--accent)" />}
+              </button>
+            </div>
           ))}
         </div>
 
-        <div className="ml-auto flex shrink-0 items-center gap-3 text-[12px] text-fg-muted">
-          <div className="flex items-center gap-2" title={connected ? "Connected" : "Reconnecting…"}><Dot on={connected} pulse={!connected} /><span className="hidden xl:inline">{connected ? "Connected" : "Reconnecting…"}</span></div>
-          <button onClick={() => { setChatOpen((o) => !o); setChatMax(false); }} aria-pressed={chatOpen} title="Toggle manager chat" aria-label="Toggle manager chat"
-            className={`grid size-8 place-items-center rounded-lg transition-colors ${chatOpen ? "bg-muted text-fg" : "text-fg-muted hover:bg-hover hover:text-fg"}`}><MessageSquare className="size-4" strokeWidth={1.75} /></button>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <span title={connected ? "Connected to the daemon" : "Reconnecting…"} className="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[12px] text-fg-muted">
+            <Dot on={connected} pulse={!connected} /><span className="hidden lg:inline">{connected ? "Live" : "Offline"}</span>
+          </span>
           <ThemeToggle />
         </div>
       </nav>

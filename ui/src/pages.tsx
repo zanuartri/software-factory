@@ -1,4 +1,4 @@
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, useApi, type FEvent, type Harness, type Issue, type Models, type Workspace } from "./api";
 import { modelOpts, MultiSelect, Select } from "./select";
@@ -10,32 +10,33 @@ export function Issues({ ws, openTicket, toast }: { ws: Workspace; openTicket: (
   const issues = useApi<Issue[]>(`/api/ws/${ws.id}/issues`, (e: FEvent) => e.ws === ws.id && /issue|store/.test(e.type));
   const [filter, setFilter] = useState("all");
   const [sel, setSel] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [draft, setDraft] = useState({ title: "", body: "", kind: "bug" });
-  const list = (issues.data ?? []).filter((i) => filter === "all" || i.status === filter);
-  const cur = issues.data?.find((i) => i.id === sel);
-  const create = () => api(`/api/ws/${ws.id}/issues`, { body: draft }).then((i: Issue) => { setDraft({ title: "", body: "", kind: "bug" }); setCreating(false); setSel(i.id); }).catch((e) => toast(e.message));
+  const all = issues.data ?? [];
+  const list = all.filter((i) => filter === "all" || i.status === filter);
+  const cur = all.find((i) => i.id === sel);
   const setStatus = (status: string) => cur && api(`/api/ws/${ws.id}/issues/${cur.id}`, { method: "PATCH", body: { status } }).catch((e) => toast(e.message));
+  const n = (f: string) => (f === "all" ? all.length : all.filter((i) => i.status === f).length);
 
   return (
     <>
-      <PageHeader title="Issues" sub={`${issues.data?.length ?? 0} total`}>
-        <Btn kind="primary" onClick={() => { setCreating(true); setSel(null); }}><Plus className="size-3.5" />New<span className="hidden md:inline"> issue</span></Btn>
+      <PageHeader title="Issues" sub={`${all.length} total`}>
+        <div role="radiogroup" aria-label="status filter" className="inline-flex max-w-full overflow-x-auto rounded-lg bg-muted p-0.5">
+          {["all", "open", "triaged", "ticketed", "stale", "closed"].map((f) => (
+            <button key={f} role="radio" aria-checked={filter === f} onClick={() => setFilter(f)}
+              className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] capitalize transition-colors ${filter === f ? "bg-surface font-medium text-fg shadow-[var(--shadow)]" : "text-fg-muted hover:text-fg"}`}>
+              {f}<span className="text-[11px] text-fg-subtle tabular-nums">{n(f)}</span>
+            </button>
+          ))}
+        </div>
       </PageHeader>
-      <div className="flex gap-1 overflow-x-auto border-b border-border px-4 py-2 md:px-6">
-        {["all", "open", "triaged", "ticketed", "stale", "closed"].map((f) => (
-          <button key={f} onClick={() => setFilter(f)} className={`h-7 rounded-md px-2.5 text-[12.5px] capitalize transition-colors ${filter === f ? "bg-muted font-medium text-fg" : "text-fg-muted hover:text-fg"}`}>{f}</button>
-        ))}
-      </div>
-      <div className="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[1fr_minmax(380px,44%)]">
-        <ul className={`min-h-0 divide-y divide-border overflow-y-auto ${cur || creating ? "hidden lg:block" : ""}`}>
+      <div className="grid min-h-0 flex-1 gap-3 overflow-hidden p-3 md:p-4 lg:grid-cols-[1fr_minmax(380px,44%)]">
+        <ul className={`min-h-0 divide-y divide-border overflow-y-auto rounded-2xl border border-border bg-bg ${cur ? "hidden lg:block" : ""}`}>
           {list.map((i) => (
             <li key={i.id}>
-              <button onClick={() => { setSel(i.id); setCreating(false); }} className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors md:px-6 ${sel === i.id ? "bg-muted" : "hover:bg-hover"}`}>
-                <span className="w-12 font-mono text-[12px] text-fg-subtle">{i.id}</span>
-                <span className="min-w-0 flex-1 truncate text-[13px]">{i.title}</span>
-                {i.tickets.length > 0 && <span className="font-mono text-[11px] text-fg-subtle">{i.tickets.join(", ")}</span>}
-                <span className="hidden w-16 text-[12px] text-fg-subtle capitalize md:inline">{i.kind}</span>
+              <button onClick={() => setSel(i.id)} className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors ${sel === i.id ? "bg-muted" : "hover:bg-hover"}`}>
+                <span className="w-12 shrink-0 font-mono text-[12px] text-fg-subtle">{i.id}</span>
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{i.title}</span>
+                {i.tickets.length > 0 && <span className="hidden shrink-0 font-mono text-[11px] text-fg-subtle xl:inline">{i.tickets.join(", ")}</span>}
+                <span className="hidden w-14 shrink-0 text-[12px] text-fg-subtle capitalize md:inline">{i.kind}</span>
                 <Badge tone={ISSUE_TONE[i.status]}>{i.status}</Badge>
               </button>
             </li>
@@ -43,31 +44,19 @@ export function Issues({ ws, openTicket, toast }: { ws: Workspace; openTicket: (
           {!list.length && <li className="py-12 text-center text-[13px] text-fg-subtle">No issues</li>}
         </ul>
 
-        <aside className={`min-h-0 overflow-y-auto border-border p-4 md:p-6 lg:block lg:border-l ${cur || creating ? "" : "hidden"}`}>
-          {(cur || creating) && (
-            <button onClick={() => { setSel(null); setCreating(false); }} className="mb-4 inline-flex items-center gap-1.5 text-[12.5px] text-fg-muted hover:text-fg lg:hidden">
+        <aside className={`min-h-0 overflow-y-auto rounded-2xl border border-border bg-bg p-4 md:p-5 lg:block ${cur ? "" : "hidden"}`}>
+          {cur && (
+            <button onClick={() => setSel(null)} className="mb-4 inline-flex items-center gap-1.5 text-[12.5px] text-fg-muted hover:text-fg lg:hidden">
               <ArrowLeft className="size-3.5" />All issues
             </button>
           )}
-          {creating ? (
-            <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (draft.title.trim()) create(); }}>
-              <h2 className="text-[15px] font-semibold">New issue</h2>
-              <input autoFocus className={inputCls} placeholder="Title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} aria-label="issue title" />
-              <div className="flex gap-1">
-                {["bug", "feature", "chore"].map((k) => (
-                  <button type="button" key={k} onClick={() => setDraft({ ...draft, kind: k })} className={`h-7 rounded-md border px-2.5 text-[12.5px] capitalize ${draft.kind === k ? "border-fg text-fg" : "border-border text-fg-muted"}`}>{k}</button>
-                ))}
-              </div>
-              <textarea className={textareaCls} rows={8} placeholder="Symptoms, steps to reproduce, expected vs actual…" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} aria-label="issue body" />
-              <div className="flex justify-end gap-2"><Btn kind="ghost" onClick={() => setCreating(false)}>Cancel</Btn><Btn type="submit" kind="primary">Create issue</Btn></div>
-            </form>
-          ) : cur ? (
+          {cur ? (
             <div className="fade-up">
               <div className="flex items-center gap-2 text-[12px] text-fg-subtle"><span className="font-mono">{cur.id}</span><span className="capitalize">· {cur.kind}</span></div>
               <h2 className="mt-1 text-lg font-semibold tracking-tight">{cur.title}</h2>
-              <div className="mt-3 inline-flex rounded-lg border border-border p-0.5">
+              <div className="mt-3 inline-flex rounded-lg bg-muted p-0.5">
                 {["open", "triaged", "stale", "closed"].map((s) => (
-                  <button key={s} onClick={() => setStatus(s)} className={`h-7 rounded-md px-2.5 text-[12.5px] capitalize ${cur.status === s ? "bg-muted font-medium text-fg" : "text-fg-muted hover:text-fg"}`}>{s}</button>
+                  <button key={s} onClick={() => setStatus(s)} className={`h-7 rounded-md px-2.5 text-[12.5px] capitalize transition-colors ${cur.status === s ? "bg-surface font-medium text-fg shadow-[var(--shadow)]" : "text-fg-muted hover:text-fg"}`}>{s}</button>
                 ))}
               </div>
               {cur.reason && <p className="mt-3 text-[12.5px] text-fg-muted">Reason: {cur.reason}</p>}
@@ -99,10 +88,10 @@ export function Rules({ ws, toast }: { ws: Workspace; toast: (m: string) => void
       <PageHeader title="Rules" sub={`${lines} standing orders · .factory/rules.md`}>
         <Btn kind="primary" disabled={text === rules.data} onClick={() => api(`/api/ws/${ws.id}/rules`, { method: "PUT", body: text }).then(() => { rules.reload(); toast("Rules saved"); }).catch((e) => toast(e.message))}>Save</Btn>
       </PageHeader>
-      <div className="grid min-h-0 flex-1 grid-rows-[1fr_auto] gap-4 overflow-hidden p-4 md:p-6 lg:grid-cols-[1fr_300px] lg:grid-rows-1 lg:gap-6">
+      <div className="grid min-h-0 flex-1 grid-rows-[1fr_auto] gap-3 overflow-hidden p-3 md:p-4 lg:grid-cols-[1fr_300px] lg:grid-rows-1">
         <textarea value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} aria-label="rules.md"
-          className={`${textareaCls} min-h-0 resize-none p-4 font-mono text-[13px] leading-7`} />
-        <aside className="space-y-2 text-[12.5px] leading-relaxed text-fg-muted lg:space-y-3 lg:text-[13px]">
+          className={`${textareaCls} min-h-0 resize-none rounded-2xl bg-bg p-4 font-mono text-[13px] leading-7`} />
+        <aside className="space-y-2 rounded-2xl border border-border bg-bg p-4 text-[12.5px] leading-relaxed text-fg-muted lg:space-y-3 lg:self-start lg:text-[13px]">
           <p>Standing orders are pasted <strong className="text-fg">verbatim</strong> into every worker and reviewer prompt. Write one numbered constraint per line.</p>
           <p>If you've told workers the same thing twice, it belongs here. <code className="font-mono text-[12px]">/factory:reflect</code> suggests new lines from gate failures.</p>
           <p className="hidden text-fg-subtle lg:block">Keep it under about 25 lines. Long rulebooks get skimmed.</p>
@@ -139,9 +128,9 @@ const Field = ({ label, children }: { label: string; children: ReactNode }) => (
   <div className="min-w-0"><div className="mb-1 text-[11.5px] text-fg-subtle">{label}</div>{children}</div>
 );
 const Group = ({ title, children }: { title: string; children: ReactNode }) => (
-  <section className="mt-8">
-    <h2 className="mb-2 text-[13px] font-medium text-fg-muted">{title}</h2>
-    <div className="card divide-y divide-border">{children}</div>
+  <section className="mt-6 first:mt-4">
+    <h2 className="mb-2 px-1 text-[13px] font-semibold">{title}</h2>
+    <div className="divide-y divide-border rounded-2xl border border-border bg-bg">{children}</div>
   </section>
 );
 function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {

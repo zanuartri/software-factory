@@ -95,7 +95,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
         <Dot on={live} color={meta?.color} pulse={st === "working"} />
         <div className="min-w-0 flex-1">
           <span className="text-[13px] font-semibold">Manager</span>
