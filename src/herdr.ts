@@ -37,7 +37,8 @@ export async function startClaude(cwd: string, label: string, resume?: string) {
 }
 
 // ---- transcript → chat messages (Claude Code writes ~/.claude/projects/<encoded cwd>/<session>.jsonl)
-export type ChatMsg = { id: string; role: "user" | "assistant" | "tool"; text: string };
+export type QA = { question: string; header?: string; answer: string | null };
+export type ChatMsg = { id: string; role: "user" | "assistant" | "tool"; text: string; qa?: QA[]; skipped?: boolean };
 const PROJECTS = join(homedir(), ".claude", "projects");
 const cache = new Map<string, { sig: string; msgs: ChatMsg[]; model: string | null }>();
 
@@ -57,18 +58,27 @@ export function readChat(session: string, limit = 300): { msgs: ChatMsg[]; model
   if (hit?.sig === sig) return { msgs: hit.msgs.slice(-limit), model: hit.model };
   const msgs: ChatMsg[] = [];
   let model: string | null = null;
+  const asked = new Map<string, number>(); // AskUserQuestion tool_use id → index in msgs, to attach the answers when they arrive
   for (const line of readFileSync(f, "utf8").split("\n")) {
     if (!line) continue;
     let e: any; try { e = JSON.parse(line); } catch { continue; }
     if (e.isSidechain || e.isMeta || !e.message) continue;
     if (e.type === "user") {
+      if (Array.isArray(e.message.content)) for (const b of e.message.content) if (b.type === "tool_result" && asked.has(b.tool_use_id)) {
+        const m = msgs[asked.get(b.tool_use_id)!], answers = e.toolUseResult?.answers as Record<string, string> | undefined;
+        if (answers) m.qa = m.qa!.map((q) => ({ ...q, answer: answers[q.question] ?? null }));
+        else m.skipped = true; // rejected / interrupted: no answers came back
+      }
       const t = userText(e.message.content).trim();
       if (t && !t.startsWith("<")) msgs.push({ id: e.uuid, role: "user", text: t }); // "<…>" = injected system-reminder / command wrappers
     } else if (e.type === "assistant" && Array.isArray(e.message.content)) {
       if (e.message.model && e.message.model !== "<synthetic>") model = e.message.model;
       e.message.content.forEach((b: any, i: number) => {
         if (b.type === "text" && b.text?.trim()) msgs.push({ id: `${e.uuid}:${i}`, role: "assistant", text: b.text });
-        else if (b.type === "tool_use") msgs.push({ id: `${e.uuid}:${i}`, role: "tool", text: `${b.name} ${toolDetail(b.input)}`.trim() });
+        else if (b.type === "tool_use" && b.name === "AskUserQuestion") {
+          asked.set(b.id, msgs.length);
+          msgs.push({ id: `${e.uuid}:${i}`, role: "tool", text: "AskUserQuestion", qa: (b.input?.questions ?? []).map((q: any) => ({ question: q.question, header: q.header, answer: null })) });
+        } else if (b.type === "tool_use") msgs.push({ id: `${e.uuid}:${i}`, role: "tool", text: `${b.name} ${toolDetail(b.input)}`.trim() });
       });
     }
   }

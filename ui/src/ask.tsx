@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, CornerDownLeft, Square, SquareCheck, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, CornerDownLeft, Square, SquareCheck, X } from "lucide-react";
 import { useState } from "react";
 
 export type PromptOption = { n: number | null; label: string; desc?: string; checked: boolean | null; chosen: boolean; focused: boolean; input: boolean };
@@ -14,6 +14,7 @@ export function AskCard({ prompt, send, busy }: { prompt: Prompt | { raw: string
   const [text, setText] = useState("");
   const [amend, setAmend] = useState(false);
   const [note, setNote] = useState("");
+  const [typed, setTyped] = useState<Record<string, string>>({}); // what was typed into each type-in option, so it stays visible after Enter
   if ("raw" in prompt) return <RawCard screen={prompt.raw} send={send} busy={busy} />;
 
   const focused = Math.max(0, prompt.options.findIndex((o) => o.focused));
@@ -23,7 +24,7 @@ export function AskCard({ prompt, send, busy }: { prompt: Prompt | { raw: string
     if (o.n != null) return send({ keys: [String(o.n)] });
     send({ keys: [...rep(i > focused ? "down" : "up", i - focused), "enter"] }); // unnumbered menu (folder trust): move the cursor, then Enter
   };
-  const submitText = (o: PromptOption) => { send({ keys: o.n != null ? [String(o.n)] : [], text, enter: true }); setTyping(null); setText(""); };
+  const submitText = (o: PromptOption) => { setTyped((t) => ({ ...t, [`${prompt.title}|${o.label}`]: text })); send({ keys: o.n != null ? [String(o.n)] : [], text, enter: true }); setTyping(null); setText(""); };
   const tabIdx = prompt.tabs.findIndex((t) => t.active);
   const goTab = (j: number) => tabIdx >= 0 && j !== tabIdx && send({ keys: rep(j > tabIdx ? "right" : "left", j - tabIdx) });
   const btn = "inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium transition-colors disabled:opacity-40";
@@ -59,7 +60,7 @@ export function AskCard({ prompt, send, busy }: { prompt: Prompt | { raw: string
                   ? (o.checked ? <SquareCheck className="mt-px size-4 shrink-0 text-primary" /> : <Square className="mt-px size-4 shrink-0 text-fg-subtle" />)
                   : <span className="mt-px grid size-[18px] shrink-0 place-items-center rounded-md bg-muted font-mono text-[11px] text-fg-muted">{o.n ?? "•"}</span>}
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] leading-snug">{o.label}</span>
+                  <span className="block text-[13px] leading-snug">{o.input && typed[`${prompt.title}|${o.label}`] ? typed[`${prompt.title}|${o.label}`] : o.label}</span>
                   {o.desc && <span className="mt-0.5 block text-[12px] leading-snug text-fg-subtle">{o.desc}</span>}
                 </span>
                 {o.chosen && <Check className="mt-px size-4 shrink-0 text-success" />}
@@ -99,6 +100,33 @@ function RawCard({ screen, send, busy }: { screen: string; send: (a: Answer) => 
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Type, then Enter…" aria-label="type into the session" className="no-ring h-7 min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-fg-subtle" />
         <button type="submit" disabled={busy || !text} aria-label="Send" className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg disabled:opacity-25"><CornerDownLeft className="size-3.5" /></button>
       </form>
+    </div>
+  );
+}
+
+export type QA = { question: string; header?: string; answer: string | null };
+
+/** The question(s) Claude asked and what was answered, kept in the thread (expanded by default, collapsible). */
+export function AnswerLog({ qa, skipped }: { qa: QA[]; skipped?: boolean }) {
+  const [open, setOpen] = useState(true);
+  const answered = qa.some((q) => q.answer !== null);
+  if (!answered && !skipped) return null; // still pending: the live card above the composer is the UI for it
+  return (
+    <div className="rounded-xl border border-border bg-bg">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-fg-muted hover:text-fg">
+        <ChevronRight className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} />
+        {skipped && !answered ? "Question skipped" : `Your answers · ${qa.length} question${qa.length > 1 ? "s" : ""}`}
+      </button>
+      {open && answered && (
+        <dl className="space-y-2 border-t border-border px-3 py-2.5">
+          {qa.map((q, i) => (
+            <div key={i}>
+              <dt className="text-[11.5px] text-fg-subtle">{q.header ? <span className="mr-1.5 rounded bg-muted px-1.5 py-px font-medium text-fg-muted">{q.header}</span> : null}{q.question}</dt>
+              <dd className="mt-0.5 text-[13px] break-words whitespace-pre-wrap">{q.answer ?? <span className="text-fg-subtle">no answer</span>}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
     </div>
   );
 }

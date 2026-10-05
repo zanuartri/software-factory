@@ -1,11 +1,11 @@
 import { ArrowUp, Maximize2, Minimize2, PanelLeftClose, Play, Plus, RotateCw, Square, Wrench } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Workspace } from "./api";
-import { AskCard, type Answer, type Prompt } from "./ask";
+import { AnswerLog, AskCard, type Answer, type Prompt, type QA } from "./ask";
 import { Select } from "./select";
 import { Btn, Dot, Md } from "./ui";
 
-type Msg = { id: string; role: "user" | "assistant" | "tool"; text: string };
+type Msg = { id: string; role: "user" | "assistant" | "tool"; text: string; qa?: QA[]; skipped?: boolean };
 type Chat = { session: string | null; pane?: string | null; status: string; model?: string | null; prompt?: Prompt | { raw: string } | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[] };
 type Cmd = { name: string; desc: string };
 
@@ -112,9 +112,9 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
       </div>
 
       <div ref={scroller} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        <div className={`space-y-3 ${wide} ${msgs.length ? "" : "h-full"}`}>
+        <div className={`flex min-h-full flex-col justify-end gap-3 ${wide}`}>
         {chat && !live && !msgs.length && (
-          <div className="grid h-full place-items-center text-center">
+          <div className="grid flex-1 place-items-center text-center">
             <div>
               <p className="text-[13px] font-medium">{chat.session ? "Session is not running in herdr" : "No manager session yet"}</p>
               <p className="mt-1 text-[12.5px] text-fg-muted">Chat always talks to a Claude session in herdr.</p>
@@ -125,7 +125,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
             </div>
           </div>
         )}
-        {msgs.map((m) => m.role === "tool"
+        {msgs.map((m) => m.qa ? <AnswerLog key={m.id} qa={m.qa} skipped={m.skipped} /> : m.role === "tool"
           ? <div key={m.id} className="flex items-center gap-1.5 truncate font-mono text-[11px] text-fg-subtle"><Wrench className="size-3 shrink-0" /><span className="truncate">{m.text}</span></div>
           : m.role === "user"
             ? <div key={m.id} className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble px-3.5 py-2 text-[13px] text-on-bubble">{m.text}</div>
