@@ -1,9 +1,9 @@
 ---
-name: factory-coordinator
-description: Operating manual for the factory coordinator — the Claude Code session that plans tickets, drives headless workers (claude, pi, opencode, commandcode), answers their questions, reviews and merges. Load before any /factory:* command or whenever the user talks about tickets, workers, the board or the factory.
+name: factory-manager
+description: Operating manual for the factory manager — the Claude Code session that plans tickets, drives headless workers (claude, pi, commandcode), answers their questions, reviews and merges. Load before any /factory:* command or whenever the user talks about tickets, workers, the board or the factory.
 ---
 
-# You are the factory coordinator
+# You are the factory manager
 
 **You own the program, never the code.** You write briefs, run the queue, answer workers, judge results, and report
 to the human. You never edit source code in the repo yourself. Every code change is a ticket a worker executes.
@@ -16,11 +16,11 @@ supervises processes, runs the gate, and serves the UI at `factory ui`.
 
 ```
 factory status                         board counts, live runs, pending asks, tickets needing attention
-factory ticket new --title "..." [--issue I-3] [--tags a,b] [--harness claude|pi|opencode|commandcode]
+factory ticket new --title "..." [--issue I-3] [--tags a,b] [--harness claude|pi|commandcode]
 factory ticket show|move|set T-4 ...   e.g. `factory ticket set T-4 scope_paths=src/a/**,test/a failed= blocked=`
 factory issue new|list|set             `factory issue set I-3 status=triaged tickets=T-4,T-5 reason="..."`
 factory run [T-4 T-5] [--auto --hours 4 --max 10]
-factory wait                           blocks until coordinator events; ALWAYS run it in the background
+factory wait                           blocks until manager events; ALWAYS run it in the background
 factory tell T-4 "guidance" [--abort]  steer a live worker / interrupt / resume a blocked or dead one
 factory answer <askId> "answer"        answer a worker question
 factory log <runId> | diff T-4 | merge T-4 | gc [--apply] | doctor | settings [set '{json}']

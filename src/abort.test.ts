@@ -67,7 +67,7 @@ test("abort+resume: the killed turn's late turn_end must not steal the resume tu
   await begin(id);
   await abortRun(id, "stop that");
   expect(fake.turns).toHaveLength(2); // initial turn + exactly one resume turn (no nudge turn)
-  expect(fake.turns[1]).toContain("⛔ Interrupted by the coordinator:");
+  expect(fake.turns[1]).toContain("⛔ Interrupted by the manager:");
   expect(fake.turns[1]).toContain("stop that");
   expect(getRun(id)!.status).toBe("running");
 });
@@ -84,7 +84,7 @@ test("abort+resume unparks a paused run instead of leaving it paused", async () 
   expect(getRun(id)!.status).toBe("running"); // not paused
 });
 
-/** Opencode-style fake: liveSteer false but ONE session — its in-band abort surfaces a turn_end (SSE session.idle) during the abort+resume window. */
+/** In-band-abort fake: liveSteer false but ONE session — its in-band abort surfaces a turn_end (SSE session.idle) during the abort+resume window. */
 function fakeOcAdapter() {
   const sends: string[] = [];
   const adapter: Adapter = {
@@ -101,13 +101,13 @@ function fakeOcAdapter() {
   return { adapter, sends };
 }
 
-test("abort+resume leaves opencode-style adapters alone: their own turn_end is not suppressed", async () => {
+test("abort+resume leaves in-band-abort adapters alone: their own turn_end is not suppressed", async () => {
   const fake = fakeOcAdapter();
   ADAPTERS.commandcode = fake.adapter;
   const id = addRun("running");
   await begin(id);
   await abortRun(id, "pause a moment");
-  expect(fake.sends).toContain("⛔ Interrupted by the coordinator:\npause a moment"); // resume turn still starts
+  expect(fake.sends).toContain("⛔ Interrupted by the manager:\npause a moment"); // resume turn still starts
   expect(fake.sends.some((s) => s.includes("factory_submit"))).toBe(true); // its turn_end reached the supervisor (nudge path), not fenced away
   expect(getRun(id)!.status).toBe("running");
 });

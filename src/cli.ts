@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// `factory` CLI — the coordinator's hands. Talks to factoryd over HTTP; starts it when it is down.
+// `factory` CLI — the manager's hands. Talks to factoryd over HTTP; starts it when it is down.
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -116,10 +116,10 @@ switch (cmd) {
     const w = await api("POST", "/api/workspaces", { path: process.cwd() });
     if (flags.session) await api("POST", `/api/ws/${w.id}/attach`, { session: flags.session, force: !!flags.force });
     const s = await api("GET", `/api/ws/${w.id}`);
-    out(`workspace ${w.id} → ${w.path}\ncoordinator: ${flags.session ?? s.coordinator ?? "-"}\nbase: ${s.settings.base_branch}\nfiles: ${join(w.path, ".factory")}/{rules.md,settings.json,verify.md,tickets/,issues/}\nui: ${BASE_URL}`, s);
+    out(`workspace ${w.id} → ${w.path}\nmanager: ${flags.session ?? s.manager ?? "-"}\nbase: ${s.settings.base_branch}\nfiles: ${join(w.path, ".factory")}/{rules.md,settings.json,verify.md,tickets/,issues/}\nui: ${BASE_URL}`, s);
     break;
   }
-  case "attach": { const w = await currentWs(); await api("POST", `/api/ws/${w.id}/attach`, { session: sub ?? flags.session, force: !!flags.force }); out(`attached as coordinator of ${w.id}`); break; }
+  case "attach": { const w = await currentWs(); await api("POST", `/api/ws/${w.id}/attach`, { session: sub ?? flags.session, force: !!flags.force }); out(`attached as manager of ${w.id}`); break; }
 
   case "status": {
     const w = await currentWs();
@@ -190,11 +190,11 @@ switch (cmd) {
     const since = existsSync(cursorFile(w.id)) ? Number(readFileSync(cursorFile(w.id), "utf8")) : 0;
     const res = await api("GET", `/api/ws/${w.id}/wait?since=${flags.since ?? since}&timeout=${Math.min(t, 240)}`);
     writeFileSync(cursorFile(w.id), String(res.cursor));
-    out(res.events.length ? res.events.map(fmtEvent).join("\n") : "(no coordinator events — still working; run `factory wait` again)", res);
+    out(res.events.length ? res.events.map(fmtEvent).join("\n") : "(no manager events — still working; run `factory wait` again)", res);
     break;
   }
   case "tell": { const w = await currentWs(); await api("POST", `/api/ws/${w.id}/tickets/${sub}/tell`, { text: rest.join(" "), abort: !!flags.abort }); out(`→ ${sub}${flags.abort ? " (abort + resume)" : ""}`); break; }
-  case "answer": { await api("POST", `/api/asks/${sub}/answer`, { answer: rest.join(" "), by: "coordinator" }); out(`answered #${sub}`); break; }
+  case "answer": { await api("POST", `/api/asks/${sub}/answer`, { answer: rest.join(" "), by: "manager" }); out(`answered #${sub}`); break; }
   case "asks": { const w = await currentWs(); const a = (await api("GET", `/api/ws/${w.id}/asks`)).filter((x: any) => flags.all || x.answer == null); out(a.map((x: any) => `#${x.id} ${x.ticket} ${x.irreversible ? "[IRREVERSIBLE] " : ""}${x.question}\n    options: ${x.options}  default: ${x.default_answer}${x.answer ? `  answered: ${x.answer} (${x.answered_by})` : ""}`).join("\n") || "(none)", a); break; }
   case "runs": { const w = await currentWs(); const r = await api("GET", `/api/ws/${w.id}/runs`); out(r.slice(0, 30).map((x: any) => `${x.id} ${x.ticket} ${x.role.padEnd(8)} ${x.harness.padEnd(11)} ${x.status.padEnd(8)} ${x.phase ?? ""} ${x.summary ?? ""}`).join("\n"), r); break; }
   case "log": { const r = await api("GET", `/api/runs/${sub}`); out(`${r.dir}\n\n## decisions\n${r.decisions}\n## report\n${r.report || "-"}\n## evidence\n${r.evidence.join("\n")}`, r); break; }
@@ -231,22 +231,19 @@ switch (cmd) {
     cc.hooks.PreToolUse.push({ matcher: ".*", hooks: [{ type: "command", command: guard }] });
     mkdirSync(join(homedir(), ".commandcode"), { recursive: true });
     writeFileSync(ccPath, JSON.stringify(cc, null, 2));
-    const ocDir = join(homedir(), ".config", "opencode", "plugins");
-    mkdirSync(ocDir, { recursive: true });
-    writeFileSync(join(ocDir, "factory-guard.ts"), `export { FactoryGuard } from ${JSON.stringify(join(ROOT, "harness", "opencode-plugin.ts").replace(/\\/g, "/"))};\n`);
-    out(`installed commandcode guard hook → ${ccPath}\ninstalled opencode guard plugin → ${join(ocDir, "factory-guard.ts")}\n\nClaude Code plugin:\n  claude plugin marketplace add ${ROOT}\n  claude plugin install factory@software-factory`);
+    out(`installed commandcode guard hook → ${ccPath}\n\nClaude Code plugin:\n  claude plugin marketplace add ${ROOT}\n  claude plugin install factory@software-factory`);
     break;
   }
   default:
     out(`factory <command>
   up | down | ui | setup | doctor
-  init [--session ID] [--force]      register this repo + attach coordinator
+  init [--session ID] [--force]      register this repo + attach manager
   status                             board, live runs, pending asks
   ticket new|list|show|move|set      tickets in .factory/tickets
   issue new|list|set                 issues in .factory/issues
   run [T-1 ...] [--auto --hours N --max N]   schedule open tickets onto workers
   stop                               stop scheduling new work
-  wait [--timeout S]                 block until coordinator events (asks, gate results, blocked, drained)
+  wait [--timeout S]                 block until manager events (asks, gate results, blocked, drained)
   tell T-1 "msg" [--abort]           steer / interrupt / resume a ticket's worker
   answer <askId> "answer" | asks     worker questions
   runs | log <run> | steer|abort|kill <run>

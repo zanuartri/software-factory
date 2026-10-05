@@ -27,7 +27,6 @@ async function run(h: Harness, args: string[]) {
 export const parse = {
   pi: (out: string): Model[] => out.split("\n").slice(1).map((l) => l.trim().split(/\s+/)).filter((c) => c.length >= 2 && c[0] && c[1])
     .map(([provider, model, ctx]) => ({ id: `${provider}/${model}`, hint: ctx ? `${ctx} context` : undefined })),
-  opencode: (out: string): Model[] => out.split("\n").map((l) => l.trim()).filter((l) => /^[\w.-]+\/\S+$/.test(l)).map((id) => ({ id })),
   // ids are "vendor/model" or bare "claude-sonnet-5"; headings ("Anthropic") and the banner have no dash/slash id + 2-space gap
   commandcode: (out: string): Model[] => out.split("\n").map((l) => l.trim().match(/^([a-z0-9][\w.:/-]*[-/][\w.:/-]*)\s{2,}(.*)$/)).filter(Boolean)
     .map((m) => ({ id: m![1], hint: m![2].trim() || undefined })),
@@ -36,7 +35,6 @@ export const parse = {
 const discover: Record<Harness, () => Promise<Model[]>> = {
   claude: async () => CLAUDE,
   pi: async () => parse.pi(await run("pi", ["--list-models"])),
-  opencode: async () => parse.opencode(await run("opencode", ["models"])),
   commandcode: async () => parse.commandcode(await run("commandcode", ["--list-models"])),
 };
 

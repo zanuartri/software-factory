@@ -28,13 +28,12 @@ export const DEFAULT_SETTINGS = {
   harnesses: {
     claude: { enabled: true, model: "sonnet", models: ["sonnet", "opus", "haiku"] },
     pi: { enabled: true, model: "", models: [] },
-    opencode: { enabled: false, model: "", models: [] },
     commandcode: { enabled: false, model: "", models: [] },
   } as Record<Harness, { enabled: boolean; model: string; models: string[] }>,
   default_harness: "claude" as Harness,
   max_workers: 3,
-  reviewer_order: ["pi", "opencode", "commandcode", "claude"] as Harness[],
-  reviewer_models: { claude: "opus", pi: "", opencode: "", commandcode: "" } as Record<Harness, string>,
+  reviewer_order: ["pi", "commandcode", "claude"] as Harness[],
+  reviewer_models: { claude: "opus", pi: "", commandcode: "" } as Record<Harness, string>,
   verify_cmd: "",
   /** cost-first routing: keyed "<harness>:<model>"; empty = today's pickHarness/pickReviewer behavior unchanged */
   catalog: {} as Record<string, { cost: number; quality: number; family: string; caps?: string[] }>,

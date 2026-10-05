@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { Harness } from "./api";
 
 export const HARNESS_COLOR: Record<string, string> = {
-  claude: "var(--h-claude)", pi: "var(--h-pi)", opencode: "var(--h-opencode)", commandcode: "var(--h-commandcode)", any: "var(--fg-subtle)",
+  claude: "var(--h-claude)", pi: "var(--h-pi)", commandcode: "var(--h-commandcode)", any: "var(--fg-subtle)",
 };
 
 export function HarnessTag({ h, model }: { h: Harness | "any"; model?: string | null }) {

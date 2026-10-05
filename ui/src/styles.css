@@ -15,36 +15,38 @@
   --color-fg-subtle: var(--fg-subtle);
   --color-primary: var(--primary);
   --color-primary-fg: var(--primary-fg);
+  --color-bubble: var(--bubble);
+  --color-on-bubble: var(--on-bubble);
   --color-accent: var(--accent);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-h-claude: var(--h-claude);
   --color-h-pi: var(--h-pi);
-  --color-h-opencode: var(--h-opencode);
   --color-h-commandcode: var(--h-commandcode);
 }
 
 :root {
   color-scheme: light;
-  --bg: #fafafa;
-  --surface: #ffffff;
-  --muted: #f4f4f5;
-  --hover: #f0f0f1;
-  --border: #e7e7e9;
-  --border-strong: #d4d4d8;
-  --fg: #18181b;
-  --fg-muted: #52525b;
-  --fg-subtle: #a1a1aa;
-  --primary: #18181b;
-  --primary-fg: #ffffff;
-  --accent: #2563eb;
-  --success: #16a34a;
-  --warning: #d97706;
-  --danger: #dc2626;
+  --bg: #f5f5f5;
+  --surface: #fcfcfc;
+  --muted: #ececec;
+  --hover: #e6e6e6;
+  --border: #dedede;
+  --border-strong: #c9c9c9;
+  --fg: #141414;
+  --fg-muted: #6b6b6b;
+  --fg-subtle: #9a9a9a;
+  --primary: #141414;
+  --primary-fg: #fcfcfc;
+  --on-bubble: #fcfcfc;
+  --bubble: #141414;
+  --accent: #7c4dff;
+  --success: #009957;
+  --warning: #c27400;
+  --danger: #c21d2e;
   --h-claude: #d97757;
   --h-pi: #0891b2;
-  --h-opencode: #65a30d;
   --h-commandcode: #7c3aed;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 1px rgb(0 0 0 / 0.02);
   --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.18), 0 2px 6px rgb(0 0 0 / 0.04);
@@ -53,24 +55,25 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0a0a0b;
-    --surface: #111113;
-    --muted: #18181b;
-    --hover: #1c1c1f;
-    --border: #232326;
-    --border-strong: #2e2e32;
-    --fg: #ededef;
-    --fg-muted: #a1a1aa;
-    --fg-subtle: #63636b;
-    --primary: #ededef;
-    --primary-fg: #0a0a0b;
-    --accent: #60a5fa;
-    --success: #4ade80;
-    --warning: #fbbf24;
-    --danger: #f87171;
+    --bg: #111111;
+    --surface: #181818;
+    --muted: #202020;
+    --hover: #2a2a2a;
+    --border: #2c2c2c;
+    --border-strong: #3d3d3d;
+    --fg: #f2f2f2;
+    --fg-muted: #a0a0a0;
+    --fg-subtle: #777777;
+    --primary: #f2f2f2;
+    --primary-fg: #141414;
+  --on-bubble: #f2f2f2;
+  --bubble: #3a3a3a;
+    --accent: #a78bfa;
+    --success: #34d69a;
+    --warning: #ffb45e;
+    --danger: #ff8a94;
     --h-claude: #e8977a;
     --h-pi: #22d3ee;
-    --h-opencode: #a3e635;
     --h-commandcode: #a78bfa;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
     --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.04);
@@ -78,24 +81,25 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0a0a0b;
-  --surface: #111113;
-  --muted: #18181b;
-  --hover: #1c1c1f;
-  --border: #232326;
-  --border-strong: #2e2e32;
-  --fg: #ededef;
-  --fg-muted: #a1a1aa;
-  --fg-subtle: #63636b;
-  --primary: #ededef;
-  --primary-fg: #0a0a0b;
-  --accent: #60a5fa;
-  --success: #4ade80;
-  --warning: #fbbf24;
-  --danger: #f87171;
+  --bg: #111111;
+  --surface: #181818;
+  --muted: #202020;
+  --hover: #2a2a2a;
+  --border: #2c2c2c;
+  --border-strong: #3d3d3d;
+  --fg: #f2f2f2;
+  --fg-muted: #a0a0a0;
+  --fg-subtle: #777777;
+  --primary: #f2f2f2;
+  --primary-fg: #141414;
+  --on-bubble: #f2f2f2;
+  --bubble: #3a3a3a;
+  --accent: #a78bfa;
+  --success: #34d69a;
+  --warning: #ffb45e;
+  --danger: #ff8a94;
   --h-claude: #e8977a;
   --h-pi: #22d3ee;
-  --h-opencode: #a3e635;
   --h-commandcode: #a78bfa;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.04);
@@ -117,7 +121,7 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border: 3px solid transparent; background-clip: padding-box; border-radius: 99px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
 
 @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .pulse { animation: pulse-dot 1.6s ease-in-out infinite; }
@@ -144,3 +148,4 @@ body {
 .md input[type=checkbox]:checked::after { content: ""; width: 7px; height: 4px; border: 2px solid var(--surface); border-top: 0; border-right: 0; transform: translateY(-1px) rotate(-45deg); }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.no-ring:focus-visible { outline: none; }

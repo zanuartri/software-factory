@@ -5,7 +5,7 @@ const str = (description: string) => ({ type: "string", description });
 export const TOOLS = [
   {
     name: "factory_report", roles: ["worker", "reviewer"],
-    description: "Report progress at every phase/unit boundary (plan, implement, test, review). Returns any pending messages from the coordinator — read and obey them.",
+    description: "Report progress at every phase/unit boundary (plan, implement, test, review). Returns any pending messages from the manager — read and obey them.",
     inputSchema: { type: "object", required: ["phase", "summary"], properties: { phase: { type: "string", enum: ["plan", "implement", "test", "review", "fix", "wrap-up"] }, summary: str("one or two lines: what just finished, what is next") } },
   },
   {
@@ -15,12 +15,12 @@ export const TOOLS = [
   },
   {
     name: "factory_ask", roles: ["worker"],
-    description: "Ask the coordinator ONLY for irreversible actions, product/preference calls no experiment settles, needing to leave scope_paths, or a real dead end. Always give options and your default. Blocks until answered or timed out; on timeout the default is applied unless irreversible.",
+    description: "Ask the manager ONLY for irreversible actions, product/preference calls no experiment settles, needing to leave scope_paths, or a real dead end. Always give options and your default. Blocks until answered or timed out; on timeout the default is applied unless irreversible.",
     inputSchema: { type: "object", required: ["question", "options", "default"], properties: { question: str("self-contained question with context"), options: { type: "array", items: { type: "string" } }, default: str("the option you will take if nobody answers"), irreversible: { type: "boolean" } } },
   },
   {
     name: "factory_inbox", roles: ["worker", "reviewer"],
-    description: "Fetch pending coordinator messages without reporting progress.",
+    description: "Fetch pending manager messages without reporting progress.",
     inputSchema: { type: "object", properties: {} },
   },
   {

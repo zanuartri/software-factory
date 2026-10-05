@@ -1,7 +1,7 @@
 # Software Factory
 
-A local factory for headless coding agents. You talk to one **coordinator** (a Claude Code session). It plans
-tickets and hands each one to a **worker**: claude, pi, opencode or commandcode, each in its own git worktree.
+A local factory for headless coding agents. You talk to one **manager** (a Claude Code session). It plans
+tickets and hands each one to a **worker**: claude, pi or commandcode, each in its own git worktree.
 Workers can't mark their own homework. The daemon re-runs the ticket's Verify commands, checks that the diff
 stays in scope, and has a **different model family** review the work before a ticket reaches review. Green
 tickets auto-merge. If the base branch breaks after a merge, the merge is reverted automatically.
@@ -16,7 +16,7 @@ One command per line (works in PowerShell and bash):
 bun install
 cd ui; bun install; bun run build; cd ..
 bun link                                        # puts `factory` on PATH (open a new terminal after)
-factory setup                                   # env-gated guards for commandcode + opencode (no-op outside factory runs)
+factory setup                                   # env-gated guards for commandcode (no-op outside factory runs)
 claude plugin marketplace add ./
 claude plugin install factory@software-factory
 factory doctor
@@ -28,7 +28,7 @@ In Claude Code, inside the repo you want to work on:
 
 | command | what happens |
 |---|---|
-| `/factory:init` | registers the repo, makes this session its coordinator, scans the repo into `.factory/rules.md` (standing orders) and `.factory/verify.md` (a proven verify recipe), and tunes settings |
+| `/factory:init` | registers the repo, makes this session its manager, scans the repo into `.factory/rules.md` (standing orders) and `.factory/verify.md` (a proven verify recipe), and tunes settings |
 | `/factory:plan <idea>` | grills you until the design is sharp, then writes draft tickets with full briefs |
 | `/factory:release` | tightens the briefs (Verify must fail today, scope is right, not too big) → open |
 | `/factory:run` | schedules open tickets onto workers and answers their questions until everything is in review |
@@ -45,8 +45,8 @@ Light, dark, or system theme.
 
 ```
 src/        daemon (Bun.serve + bun:sqlite), CLI, adapters, supervisor, gate, guard, minimal MCP
-harness/    pi extension + opencode plugin (factory tools + guard)
-plugin/     Claude Code plugin: /factory:* commands + coordinator / worker / reviewer skills
+harness/    pi extension (factory tools + guard)
+plugin/     Claude Code plugin: /factory:* commands + manager / worker / reviewer skills
 ui/         React + Vite + Tailwind console
 ~/.factory  factory.db, worktrees/<ws>/<ticket>, runs/<ws>/<ticket>/<run> (transcripts, decisions.tsv, gate evidence)
 ```

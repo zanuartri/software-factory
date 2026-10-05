@@ -7,10 +7,10 @@
     {
       "name": "factory",
       "source": "./plugin",
-      "description": "Coordinator + headless workers software factory"
+      "description": "Manager + headless workers software factory"
     }
   ],
   "metadata": {
-    "description": "Software factory: coordinator + headless workers with an independent verify and cross-family review gate"
+    "description": "Software factory: manager + headless workers with an independent verify and cross-family review gate"
   }
 }

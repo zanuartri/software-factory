@@ -3,7 +3,7 @@ description: Autonomous mode — triage issues, turn them into tickets, release,
 argument-hint: "[--hours N] [--max N] [I-1 I-2 ...]"
 ---
 
-Load the `factory-coordinator` skill first. The human is **away**. Never block on them. Make reversible calls
+Load the `factory-manager` skill first. The human is **away**. Never block on them. Make reversible calls
 yourself and write them down. Park irreversible ones.
 
 **Exit predicate:** every ticket created in this run is `in_review`, `blocked`, or `failed` with a write-up, or the

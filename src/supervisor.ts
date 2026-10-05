@@ -37,14 +37,14 @@ export function registerWorkspace(path: string): Workspace {
   return getWs(id)!;
 }
 export const listWorkspaces = () => db.query("SELECT * FROM workspaces ORDER BY name").all() as Workspace[];
-export function attachCoordinator(ws: string, session: string, force = false) {
+export function attachManager(ws: string, session: string, force = false) {
   const w = mustWs(ws);
-  const live = w.coordinator && w.coordinator !== session && Date.now() - (w.coordinator_seen ?? 0) < 10 * 60e3;
-  if (live && !force) throw new Error(`workspace already has a live coordinator (${w.coordinator}); pass --force to take over`);
-  db.query("UPDATE workspaces SET coordinator=?, coordinator_seen=? WHERE id=?").run(session, Date.now(), ws);
-  emit(ws, "coordinator.attached", { session });
+  const live = w.manager && w.manager !== session && Date.now() - (w.manager_seen ?? 0) < 10 * 60e3;
+  if (live && !force) throw new Error(`workspace already has a live manager (${w.manager}); pass --force to take over`);
+  db.query("UPDATE workspaces SET manager=?, manager_seen=? WHERE id=?").run(session, Date.now(), ws);
+  emit(ws, "manager.attached", { session });
 }
-export const touchCoordinator = (ws: string) => db.query("UPDATE workspaces SET coordinator_seen=? WHERE id=?").run(Date.now(), ws);
+export const touchManager = (ws: string) => db.query("UPDATE workspaces SET manager_seen=? WHERE id=?").run(Date.now(), ws);
 export function mustWs(ws: string) {
   const w = getWs(ws);
   if (!w) throw new Error(`unknown workspace ${ws}`);
@@ -71,7 +71,7 @@ function pendingMessages(runId: string) {
   const rows = db.query("SELECT id, body FROM mailbox WHERE run=? AND delivered=0 ORDER BY id").all(runId) as { id: number; body: string }[];
   if (!rows.length) return "";
   db.query(`UPDATE mailbox SET delivered=1 WHERE id IN (${rows.map((r) => r.id).join(",")})`).run();
-  return `\n\n📨 Messages from the coordinator (these override your plan — acknowledge with factory_decision):\n${rows.map((r) => `- ${r.body}`).join("\n")}`;
+  return `\n\n📨 Messages from the manager (these override your plan — acknowledge with factory_decision):\n${rows.map((r) => `- ${r.body}`).join("\n")}`;
 }
 
 const SYSTEM32_BASH = /[\\/]windows[\\/]system32[\\/]/i;
@@ -208,7 +208,7 @@ export function startPlan(ws: string, o: { only?: string[]; hours?: number; maxT
 export function stopPlan(ws: string) {
   const p = plans.get(ws);
   if (p) p.active = false;
-  emit(ws, "plan.stopped", {}, { coordinator: true });
+  emit(ws, "plan.stopped", {}, { manager: true });
 }
 export const planState = (ws: string) => plans.get(ws) ?? null;
 
@@ -240,7 +240,7 @@ function schedulePass(ws: string) {
 
   for (const t of eligible) {
     if (!spawnAllowed) break;
-    // parked runs (idle/paused: blocked, waiting on the coordinator) hold a worktree but no slot
+    // parked runs (idle/paused: blocked, waiting on the manager) hold a worktree but no slot
     const workers = running.filter((r) => r.role === "worker" && r.status !== "idle" && r.status !== "paused");
     if (workers.length >= s.max_workers) break;
     const busy = workers.filter((r) => r.ticket !== t.id).map((r) => byId.get(r.ticket)).filter(Boolean) as store.Ticket[];
@@ -250,7 +250,7 @@ function schedulePass(ws: string) {
     plan.started++;
     spawnWorker(ws, t.id, { harness: picked.harness, model: picked.model }).catch((e) => {
       store.updateTicket(w.path, t.id, { blocked: `spawn failed: ${e.message}` });
-      emit(ws, "ticket.blocked", { reason: e.message }, { ticket: t.id, coordinator: true });
+      emit(ws, "ticket.blocked", { reason: e.message }, { ticket: t.id, manager: true });
     });
     running = activeRuns(ws); // spawnWorker inserts its run row synchronously, before its first await
   }
@@ -264,7 +264,7 @@ function schedulePass(ws: string) {
     emit(ws, "plan.drained", {
       mode: plan.mode, in_review: count((t) => t.status === "in_review"), blocked: count((t) => !!t.blocked), failed: count((t) => !!t.failed),
       open_left: count((t) => t.status === "open" && !t.blocked && !t.failed), budget_exhausted: !spawnAllowed,
-    }, { coordinator: true });
+    }, { manager: true });
   }
 }
 
@@ -307,7 +307,7 @@ export async function spawnWorker(ws: string, ticketId: string, o: { harness?: H
   addTimer(id, tb, () => {
     if (!isLive(id)) return;
     steer(id, "⏰ Timebox expired. Stop starting new work: commit what is verified, then factory_submit (ready if acceptance is met, otherwise blocked with partial findings) within 10 minutes.");
-    emit(ws, "run.timebox", { minutes: tb / 60e3 }, { ticket: t.id, run: id, coordinator: true });
+    emit(ws, "run.timebox", { minutes: tb / 60e3 }, { ticket: t.id, run: id, manager: true });
     addTimer(id, 10 * 60e3, () => isLive(id) && !submitted.has(id) && finishRun(id, "failed", "timebox exceeded"));
   });
   emit(ws, "run.started", { harness, model, attempt, branch }, { ticket: t.id, run: id });
@@ -324,7 +324,7 @@ export async function startAdapter(run: Run, prompt: string, extra: { resumeSess
   // Every entry point converges here: a worker that starts without a session to resume must still get its brief.
   if (run.role === "worker" && !extra.resumeSession && !prompt.startsWith(WORKER_MARK)) {
     const s = store.loadSettings(w.path);
-    prompt = `${workerPrompt(t, store.loadRules(w.path), { branch: run.branch!, base: s.base_branch, attempt: run.attempt, worktree: run.worktree! })}\n\n---\n# Message from the coordinator (read after the brief)\n${prompt}`;
+    prompt = `${workerPrompt(t, store.loadRules(w.path), { branch: run.branch!, base: s.base_branch, attempt: run.attempt, worktree: run.worktree! })}\n\n---\n# Message from the manager (read after the brief)\n${prompt}`;
   }
   if (!remoteSnap.has(run.id)) remoteSnap.set(run.id, git.remoteRefs(w.path)); // lost on daemon restart; never compare against nothing
   writeFileSync(join(runDir(run), `prompt-${Date.now()}.md`), prompt);
@@ -371,7 +371,7 @@ function onAdapterEvent(id: string, e: NormEvent) {
     case "exit":
       handles.delete(id);
       if (isLive(id) && r.status !== "gating") {
-        emit(r.ws, "run.died", { code: e.code }, { ...meta, coordinator: r.role === "worker" });
+        emit(r.ws, "run.died", { code: e.code }, { ...meta, manager: r.role === "worker" });
         if (r.role === "worker") blockTicket(r, `worker process exited (code ${e.code}) — resume with \`factory tell ${r.ticket}\``);
         else verdictWaiters.get(id)?.({ verdict: "FAIL", findings: `Reviewer process exited (code ${e.code}) without verdict.` });
       }
@@ -382,7 +382,7 @@ function blockTicket(r: Run, reason: string) {
   const w = getWs(r.ws)!;
   store.updateTicket(w.path, r.ticket, { blocked: reason });
   finishRun(r.id, "idle");
-  emit(r.ws, "ticket.blocked", { reason }, { ticket: r.ticket, run: r.id, coordinator: true });
+  emit(r.ws, "ticket.blocked", { reason }, { ticket: r.ticket, run: r.id, manager: true });
   schedule(r.ws);
 }
 
@@ -395,7 +395,7 @@ function finishRun(id: string, status: Run["status"], failReason?: string) {
   if (status !== "idle") db.query("UPDATE asks SET answer='(run ended)', answered_by='expired' WHERE run=? AND answer IS NULL").run(id); // nobody is left to read the answer
   if (failReason && r.role === "worker") {
     store.updateTicket(getWs(r.ws)!.path, r.ticket, { failed: failReason });
-    emit(r.ws, "ticket.failed", { reason: failReason }, { ticket: r.ticket, run: id, coordinator: true });
+    emit(r.ws, "ticket.failed", { reason: failReason }, { ticket: r.ticket, run: id, manager: true });
   }
   if (r.role === "worker") schedule(r.ws);
 }
@@ -422,7 +422,7 @@ export async function callTool(runId: string, name: string, args: any): Promise<
       const wait = Math.min(s.ask_timeout_min, 10) * 60e3;
       const { id } = db.query("INSERT INTO asks (ws,ticket,run,question,options,default_answer,irreversible,deadline,created_at) VALUES (?,?,?,?,?,?,?,?,?) RETURNING id")
         .get(r.ws, r.ticket, runId, args.question, JSON.stringify(args.options ?? []), args.default ?? null, args.irreversible ? 1 : 0, Date.now() + wait, Date.now()) as { id: number };
-      emit(r.ws, "ask", { id, ...args }, { ...meta, coordinator: true });
+      emit(r.ws, "ask", { id, ...args }, { ...meta, manager: true });
       const answer = await new Promise<string | null>((res) => { askWaiters.set(id, res); setTimeout(() => res(null), wait); });
       askWaiters.delete(id);
       if (answer !== null) return `Answer: ${answer}` + pendingMessages(runId);
@@ -439,11 +439,11 @@ export async function callTool(runId: string, name: string, args: any): Promise<
       if (args.status === "blocked") {
         store.updateTicket(w.path, r.ticket, { sections: { Report: args.report } } as any);
         blockTicket(r, (args.report ?? "").split("\n").find((l: string) => l.trim()) ?? "blocked by worker");
-        return "Recorded as blocked. End your turn now; the coordinator will reply.";
+        return "Recorded as blocked. End your turn now; the manager will reply.";
       }
       updateRun(runId, { status: "gating", phase: "gate" });
       gate(runId, args.report ?? "").catch((e) => {
-        emit(r.ws, "gate.error", { error: String(e) }, { ...meta, coordinator: true });
+        emit(r.ws, "gate.error", { error: String(e) }, { ...meta, manager: true });
         blockTicket(getRun(runId)!, `gate crashed: ${e.message}`);
       });
       return "Submitted to the gate. End your turn now. If the gate fails you will receive findings as your next message.";
@@ -513,7 +513,7 @@ async function gate(workerRunId: string, report: string) {
   const gateMd = `### Gate (attempt ${r.attempt})\n- scope/commit/push checks: ${structuralOk ? "ok" : "FAIL"}\n- verify:\n${verifyLog || "  (no commands)\n"}- review: ${verdict ? verdict.verdict : "skipped"}\n- evidence: \`${dir}\``;
   if (!findings.length) {
     store.updateTicket(w.path, t.id, { status: "in_review", sections: { Report: `${report}\n\n${gateMd}\n\n${verdict?.findings ?? ""}` } } as any);
-    emit(r.ws, "gate.passed", { attempt: r.attempt, head: git.head(r.worktree!) }, { ...meta, coordinator: true });
+    emit(r.ws, "gate.passed", { attempt: r.attempt, head: git.head(r.worktree!) }, { ...meta, manager: true });
     // parked siblings from earlier attempts would otherwise linger on the Workers page forever
     db.query("UPDATE runs SET status='killed', ended_at=? WHERE ws=? AND ticket=? AND role='worker' AND id<>? AND status IN ('idle','paused')").run(Date.now(), r.ws, r.ticket, r.id);
     finishRun(r.id, "done"); // after the emit: finishRun may schedule → plan.drained, which must come last
@@ -581,14 +581,14 @@ export function steer(runId: string, text: string) {
 export async function abortRun(runId: string, text?: string) {
   const r = getRun(runId);
   if (!r) throw new Error("unknown run");
-  if (text && ADAPTERS[r.harness].caps.oneProcPerTurn) aborting.add(runId); // only a killed process-per-turn leaks a late turn_end; claude/pi steer in-band, opencode's in-session abort keeps its own end
+  if (text && ADAPTERS[r.harness].caps.oneProcPerTurn) aborting.add(runId); // only a killed process-per-turn leaks a late turn_end; claude/pi steer in-band
   try {
     await handles.get(runId)?.abort();
     emit(r.ws, "run.abort", { text }, { ticket: r.ticket, run: runId });
     if (text) {
       db.query("UPDATE mailbox SET delivered=1 WHERE run=?").run(runId);
       if (["paused", "idle"].includes(getRun(runId)!.status)) updateRun(runId, { status: "running" }); // a resume turn is starting: no longer parked
-      await sendOrResume(runId, `⛔ Interrupted by the coordinator:\n${text}`);
+      await sendOrResume(runId, `⛔ Interrupted by the manager:\n${text}`);
     } else updateRun(runId, { status: "paused" });
   } finally {
     aborting.delete(runId);
@@ -597,11 +597,11 @@ export async function abortRun(runId: string, text?: string) {
 
 export const killRun = (runId: string) => {
   const r = getRun(runId);
-  if (r?.role === "worker") store.updateTicket(getWs(r.ws)!.path, r.ticket, { blocked: "killed by coordinator" });
+  if (r?.role === "worker") store.updateTicket(getWs(r.ws)!.path, r.ticket, { blocked: "killed by manager" });
   finishRun(runId, "killed");
 };
 
-/** Coordinator → ticket: steer the live worker, or resume the last session (blocked / paused / died). */
+/** Manager → ticket: steer the live worker, or resume the last session (blocked / paused / died). */
 export async function tell(ws: string, ticketId: string, text: string, o: { abort?: boolean } = {}) {
   const w = mustWs(ws);
   const live = activeWorkerFor(ws, ticketId);
@@ -628,7 +628,7 @@ async function doMerge(ws: string, ticketId: string) {
   if (!t || t.status !== "in_review") throw new Error(`${ticketId} is not in_review`);
   const wt = git.worktreePath(ws, t.id);
   if (!existsSync(wt) || !t.branch) throw new Error(`${ticketId} has no worktree/branch`);
-  const meta = { ticket: t.id, coordinator: true };
+  const meta = { ticket: t.id, manager: true };
 
   // 1. bring base in (merge, not rebase: the worker can resolve markers with plain add+commit)
   const m = git.git(wt, "merge", "--no-edit", s.base_branch);
@@ -738,7 +738,7 @@ export function reviewerCheck(s: store.Settings): { ok: boolean; detail: string 
 export function doctor(ws?: string) {
   const checks: { name: string; ok: boolean; detail: string }[] = [];
   const add = (name: string, ok: boolean, detail = "") => checks.push({ name, ok, detail });
-  for (const bin of ["git", "claude", "pi", "opencode", "commandcode", "gh"]) add(`bin:${bin}`, !!Bun.which(bin), Bun.which(bin) ?? "not on PATH");
+  for (const bin of ["git", "claude", "pi", "commandcode", "gh"]) add(`bin:${bin}`, !!Bun.which(bin), Bun.which(bin) ?? "not on PATH");
   const bash = bashPath();
   const bashOk = process.platform === "win32" ? existsSync(bash) : !!Bun.which(bash);
   add("bin:bash", bashOk, bashOk ? bash : `${bash} not found (PATH bash: ${Bun.which("bash") ?? "none"})`);
@@ -765,12 +765,12 @@ export function doctor(ws?: string) {
 setInterval(() => {
   const stale = db.query("SELECT * FROM runs WHERE status='running' AND heartbeat_at < ?").all(Date.now() - 15 * 60e3) as Run[];
   for (const r of stale) {
-    emit(r.ws, "run.stuck", { minutes: Math.round((Date.now() - (r.heartbeat_at ?? r.started_at)) / 60e3) }, { ticket: r.ticket, run: r.id, coordinator: true });
+    emit(r.ws, "run.stuck", { minutes: Math.round((Date.now() - (r.heartbeat_at ?? r.started_at)) / 60e3) }, { ticket: r.ticket, run: r.id, manager: true });
     updateRun(r.id, { heartbeat_at: Date.now() }); // re-alert in another 15 min, not every tick
   }
 }, 60e3);
 
-/** On daemon start, runs whose process died with the old daemon are marked idle so the coordinator can resume them. */
+/** On daemon start, runs whose process died with the old daemon are marked idle so the manager can resume them. */
 export function recoverAfterRestart() {
   const dead = db.query("SELECT * FROM runs WHERE status IN ('starting','running','gating')").all() as Run[];
   for (const r of dead) {
@@ -779,7 +779,7 @@ export function recoverAfterRestart() {
     if (r.role === "worker") {
       const w = getWs(r.ws);
       if (w) store.updateTicket(w.path, r.ticket, { blocked: "daemon restarted mid-run — `factory tell` to resume" });
-      emit(r.ws, "run.died", { reason: "daemon restart" }, { ticket: r.ticket, run: r.id, coordinator: true });
+      emit(r.ws, "run.died", { reason: "daemon restart" }, { ticket: r.ticket, run: r.id, manager: true });
     }
   }
 }

@@ -1,13 +1,13 @@
 ---
-description: Register this repo as a factory workspace, make this session its coordinator, and scan the repo into standing orders + a verify recipe
+description: Register this repo as a factory workspace, make this session its manager, and scan the repo into standing orders + a verify recipe
 argument-hint: "[--force]"
 ---
 
-Load the `factory-coordinator` skill first.
+Load the `factory-manager` skill first.
 
-1. Run `factory init --session ${CLAUDE_SESSION_ID} $ARGUMENTS`. If it says another coordinator is live, tell the
+1. Run `factory init --session ${CLAUDE_SESSION_ID} $ARGUMENTS`. If it says another manager is live, tell the
    human and only continue with `--force` if they agree.
-2. Run `factory doctor`. If the commandcode/opencode guards aren't installed and those harnesses exist, run `factory setup`.
+2. Run `factory doctor`. If the commandcode guard aren't installed and that harness exists, run `factory setup`.
 3. **Scan the repo.** Send 2–3 parallel read-only Explore subagents so your own context stays small. Answer from the
    code, not from the human:
    - stack, package manager, and the exact **build / test / lint / typecheck** commands (from package scripts,

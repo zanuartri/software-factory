@@ -13,7 +13,7 @@ db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
 db.exec(`
 CREATE TABLE IF NOT EXISTS workspaces (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
-  coordinator TEXT, coordinator_seen INTEGER, created_at INTEGER NOT NULL
+  manager TEXT, manager_seen INTEGER, created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, ws TEXT NOT NULL, ticket TEXT NOT NULL, role TEXT NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ws TEXT NOT NULL, ticket TEXT, run TEXT,
-  type TEXT NOT NULL, data TEXT, for_coordinator INTEGER DEFAULT 0, ts INTEGER NOT NULL
+  type TEXT NOT NULL, data TEXT, for_manager INTEGER DEFAULT 0, ts INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS asks (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ws TEXT NOT NULL, ticket TEXT, run TEXT NOT NULL,
@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS mailbox (
 );
 CREATE INDEX IF NOT EXISTS ev_ws ON events(ws, id);
 `);
+// coordinator → manager rename on existing DBs; throws (ignored) once the old column is gone
+for (const sql of ["ALTER TABLE workspaces RENAME COLUMN coordinator TO manager", "ALTER TABLE workspaces RENAME COLUMN coordinator_seen TO manager_seen", "ALTER TABLE events RENAME COLUMN for_coordinator TO for_manager"]) {
+  try { db.exec(sql); } catch {}
+}
 
 export type Run = {
   id: string; ws: string; ticket: string; role: "worker" | "reviewer"; harness: Harness; model: string | null;
@@ -45,17 +49,17 @@ export type Run = {
   attempt: number; parent: string | null; token: string; summary: string | null; tokens: number;
   started_at: number; heartbeat_at: number | null; ended_at: number | null;
 };
-export type Harness = "claude" | "pi" | "opencode" | "commandcode";
-export type Workspace = { id: string; name: string; path: string; coordinator: string | null; coordinator_seen: number | null; created_at: number };
+export type Harness = "claude" | "pi" | "commandcode";
+export type Workspace = { id: string; name: string; path: string; manager: string | null; manager_seen: number | null; created_at: number };
 
 const listeners = new Set<(e: any) => void>();
 export const onEvent = (fn: (e: any) => void) => (listeners.add(fn), () => listeners.delete(fn));
 
-export function emit(ws: string, type: string, data: any = {}, opts: { ticket?: string; run?: string; coordinator?: boolean } = {}) {
+export function emit(ws: string, type: string, data: any = {}, opts: { ticket?: string; run?: string; manager?: boolean } = {}) {
   const ts = Date.now();
-  const r = db.query("INSERT INTO events (ws,ticket,run,type,data,for_coordinator,ts) VALUES (?,?,?,?,?,?,?) RETURNING id")
-    .get(ws, opts.ticket ?? null, opts.run ?? null, type, JSON.stringify(data), opts.coordinator ? 1 : 0, ts) as { id: number };
-  const ev = { id: r.id, ws, ticket: opts.ticket, run: opts.run, type, data, for_coordinator: !!opts.coordinator, ts };
+  const r = db.query("INSERT INTO events (ws,ticket,run,type,data,for_manager,ts) VALUES (?,?,?,?,?,?,?) RETURNING id")
+    .get(ws, opts.ticket ?? null, opts.run ?? null, type, JSON.stringify(data), opts.manager ? 1 : 0, ts) as { id: number };
+  const ev = { id: r.id, ws, ticket: opts.ticket, run: opts.run, type, data, for_manager: !!opts.manager, ts };
   for (const l of listeners) l(ev);
   return ev;
 }

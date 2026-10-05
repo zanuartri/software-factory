@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs"
 import { join } from "node:path";
 import { db, emit, getRun, HOME, onEvent, PORT, type Run } from "./db";
 import * as git from "./git";
+import * as herdr from "./herdr";
 import { handleMcp } from "./mcp";
 import { listModels } from "./models";
 import { ROOT } from "./prompts";
@@ -20,7 +21,7 @@ function runDetail(r: Run) {
   return { ...r, token: undefined, dir, decisions: read("decisions.tsv"), report: read("report.md"), transcript_tail: tail, evidence };
 }
 
-// ---- file watcher: humans and the coordinator edit .factory/*.md directly
+// ---- file watcher: humans and the manager edit .factory/*.md directly
 const watchers = new Map<string, ReturnType<typeof watch>>();
 function watchWs(id: string, path: string) {
   if (watchers.has(id) || !existsSync(join(path, ".factory"))) return;
@@ -45,7 +46,41 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   "/api/ws/:ws": {
     GET: ({ params }) => { const w = sup.mustWs(params.ws); return json({ ...w, settings: store.loadSettings(w.path), rules: store.loadRules(w.path), plan: sup.planState(w.id) }); },
   },
-  "/api/ws/:ws/attach": { POST: async (req) => { const b = await body(req); sup.attachCoordinator(req.params.ws, b.session, b.force); return json({ ok: true }); } },
+  "/api/ws/:ws/attach": { POST: async (req) => { const b = await body(req); sup.attachManager(req.params.ws, b.session, b.force); return json({ ok: true }); } },
+  // chat = the manager's Claude session inside herdr: transcript for reading, `herdr agent prompt` for writing
+  "/api/ws/:ws/chat": {
+    GET: async ({ params }) => {
+      const w = sup.mustWs(params.ws);
+      if (!w.manager) return json({ session: null, status: "none", messages: [] });
+      const agent = await herdr.findAgent(w.manager).catch(() => null);
+      const { msgs, model } = herdr.readChat(w.manager);
+      const usage = agent ? await herdr.readUsage(agent.pane_id) : null;
+      return json({ session: w.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, messages: msgs });
+    },
+    POST: async (req) => {
+      const w = sup.mustWs(req.params.ws), agent = w.manager ? await herdr.findAgent(w.manager) : null;
+      if (!agent) throw new Error("manager session is not running in herdr — start or resume one");
+      await herdr.prompt(agent.pane_id, (await body(req)).text);
+      return json({ ok: true });
+    },
+  },
+  "/api/ws/:ws/chat/commands": { GET: ({ params }) => json(herdr.slashCommands(wsPath(params.ws))) },
+  "/api/ws/:ws/chat/interrupt": {
+    POST: async ({ params }) => {
+      const w = sup.mustWs(params.ws), agent = w.manager ? await herdr.findAgent(w.manager) : null;
+      if (agent) await herdr.interrupt(agent.pane_id);
+      return json({ ok: true });
+    },
+  },
+  /** { resume: true } continues the attached session; otherwise a fresh claude session starts in a new herdr workspace. */
+  "/api/ws/:ws/chat/start": {
+    POST: async (req) => {
+      const w = sup.mustWs(req.params.ws), b = await body(req);
+      const session = await herdr.startClaude(w.path, w.name, b.resume ? w.manager ?? undefined : undefined);
+      sup.attachManager(w.id, session, true);
+      return json({ session });
+    },
+  },
   "/api/ws/:ws/settings": {
     GET: ({ params }) => json(store.loadSettings(wsPath(params.ws))),
     PUT: async (req) => { const p = wsPath(req.params.ws); store.saveSettings(p, { ...store.loadSettings(p), ...(await body(req)) }); emit(req.params.ws, "settings.changed"); return json(store.loadSettings(p)); },
@@ -153,22 +188,22 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       return json(rows.reverse().map((e) => ({ ...e, data: JSON.parse(e.data ?? "{}") })));
     },
   },
-  /** Coordinator long-poll: returns as soon as a coordinator-relevant event exists after `since`. */
+  /** Manager long-poll: returns as soon as a manager-relevant event exists after `since`. */
   "/api/ws/:ws/wait": {
     GET: async (req) => {
       const u = new URL(req.url), ws = req.params.ws, since = Number(u.searchParams.get("since") ?? 0);
       const timeout = Math.min(Number(u.searchParams.get("timeout") ?? 600), 3000) * 1000;
-      sup.touchCoordinator(ws);
-      const q = () => (db.query("SELECT * FROM events WHERE ws=? AND id>? AND for_coordinator=1 ORDER BY id").all(ws, since) as any[]).map((e) => ({ ...e, data: JSON.parse(e.data ?? "{}") }));
+      sup.touchManager(ws);
+      const q = () => (db.query("SELECT * FROM events WHERE ws=? AND id>? AND for_manager=1 ORDER BY id").all(ws, since) as any[]).map((e) => ({ ...e, data: JSON.parse(e.data ?? "{}") }));
       let rows = q();
       if (!rows.length) {
         await new Promise<void>((res) => {
-          const off = onEvent((e) => { if (e.ws === ws && e.for_coordinator) { off(); setTimeout(res, 1500); } }); // small window to batch siblings
+          const off = onEvent((e) => { if (e.ws === ws && e.for_manager) { off(); setTimeout(res, 1500); } }); // small window to batch siblings
           setTimeout(() => { off(); res(); }, timeout);
         });
         rows = q();
       }
-      sup.touchCoordinator(ws);
+      sup.touchManager(ws);
       return json({ events: rows, cursor: rows.at(-1)?.id ?? since });
     },
   },

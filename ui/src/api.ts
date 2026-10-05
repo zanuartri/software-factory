@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type Harness = "claude" | "pi" | "opencode" | "commandcode";
+export type Harness = "claude" | "pi" | "commandcode";
 export type Ticket = {
   id: string; title: string; status: "draft" | "open" | "in_progress" | "in_review" | "done"; priority: string;
   tags: string[]; depends_on: string[]; scope_paths: string[]; harness: Harness | "any"; model: string;
@@ -12,11 +12,11 @@ export type Run = {
   status: string; phase: string | null; attempt: number; summary: string | null; tokens: number; parent: string | null;
   started_at: number; heartbeat_at: number | null; ended_at: number | null; session_id: string | null;
 };
-export type FEvent = { id: number; ws: string; ticket?: string; run?: string; type: string; data: any; ts: number; for_coordinator?: boolean | number };
+export type FEvent = { id: number; ws: string; ticket?: string; run?: string; type: string; data: any; ts: number; for_manager?: boolean | number };
 export type Ask = { id: number; ws: string; ticket: string; run: string; question: string; options: string; default_answer: string; irreversible: number; answer: string | null; answered_by: string | null; created_at: number; deadline: number };
 export type Issue = { id: string; title: string; status: string; kind: string; tags: string[]; tickets: string[]; body: string; reason?: string | null; created: string };
 export type Models = Record<Harness, { id: string; hint?: string }[]>;
-export type Workspace = { id: string; name: string; path: string; coordinator: string | null; coordinator_seen: number | null; settings: any; plan: any };
+export type Workspace = { id: string; name: string; path: string; manager: string | null; manager_seen: number | null; settings: any; plan: any };
 
 export async function api<T = any>(path: string, init?: { method?: string; body?: unknown; text?: boolean }): Promise<T> {
   const res = await fetch(path, {

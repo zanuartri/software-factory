@@ -2,7 +2,7 @@
 description: Mine recent gate failures, asks and blocks for repeated mistakes and turn them into standing orders
 ---
 
-Load the `factory-coordinator` skill first, and follow its **Reflect** section:
+Load the `factory-manager` skill first, and follow its **Reflect** section:
 
 1. Collect the evidence: `factory asks --all`, blocked/failed tickets in `factory ticket list`, and
    `~/.factory/runs/<ws>/*/*/gate-*/findings.md` plus `review.md` from recent runs (use a subagent to read them in bulk).

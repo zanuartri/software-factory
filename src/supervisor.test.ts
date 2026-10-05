@@ -65,14 +65,13 @@ test("bashPath is Git Bash on Windows, never the System32 WSL launcher", () => {
 const CATALOG = {
   "commandcode:cheapo": { cost: 0.5, quality: 2, family: "cheapo" },
   "commandcode:deepseek": { cost: 1, quality: 3, family: "deepseek" },
-  "opencode:mimo": { cost: 2, quality: 3, family: "mimo" },
+  "pi:mimo": { cost: 2, quality: 3, family: "mimo" },
   "pi:hy3": { cost: 2, quality: 4, family: "hy3", caps: ["ui"] },
   "claude:sonnet": { cost: 5, quality: 4, family: "claude" },
   "claude:opus": { cost: 8, quality: 5, family: "claude" },
 };
 function settingsWithCatalog() {
   const s = structuredClone(DEFAULT_SETTINGS);
-  s.harnesses.opencode.enabled = true;
   s.harnesses.commandcode.enabled = true;
   s.catalog = structuredClone(CATALOG);
   return s;
@@ -102,13 +101,12 @@ test("pickWorker: a ui tag requires the ui cap", () => {
 
 test("pickWorker: a high-difficulty retry (minQuality 5) takes the best free pair, not the default harness", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
-  s.harnesses.opencode.enabled = true;
   s.harnesses.commandcode.enabled = true;
   s.catalog = {
     "commandcode:retry-cheap": { cost: 1, quality: 3, family: "a" },
-    "opencode:retry-best": { cost: 9, quality: 4, family: "b" },
+    "pi:retry-best": { cost: 9, quality: 4, family: "b" },
   };
-  expect(pickWorker(s, mkTicket({ difficulty: "high" }), [], 2)).toEqual({ harness: "opencode", model: "retry-best" });
+  expect(pickWorker(s, mkTicket({ difficulty: "high" }), [], 2)).toEqual({ harness: "pi", model: "retry-best" });
 });
 
 test("pickWorker: the quality fallback never picks a max:0 (reviewer-only) harness", () => {
@@ -135,13 +133,12 @@ test("pickWorker: an explicit ticket harness/model wins", () => {
 
 test("pickWorker: two equal-cost pairs alternate across calls", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
-  s.harnesses.opencode.enabled = true;
   s.harnesses.commandcode.enabled = true;
-  s.catalog = { "opencode:tieA": { cost: 3, quality: 3, family: "a" }, "commandcode:tieB": { cost: 3, quality: 3, family: "b" } };
+  s.catalog = { "pi:tieA": { cost: 3, quality: 3, family: "a" }, "commandcode:tieB": { cost: 3, quality: 3, family: "b" } };
   const t = mkTicket();
-  expect(pickWorker(s, t, [])?.harness).toBe("opencode");
+  expect(pickWorker(s, t, [])?.harness).toBe("pi");
   expect(pickWorker(s, t, [])?.harness).toBe("commandcode");
-  expect(pickWorker(s, t, [])?.harness).toBe("opencode");
+  expect(pickWorker(s, t, [])?.harness).toBe("pi");
 });
 
 test("pickWorker: an empty catalog gives today's result", () => {
@@ -212,14 +209,13 @@ test("effectiveQuality: neutral blocks do not pad the outcome count", () => {
 
 test("pickWorker: a demoted pair loses to the next-cheapest qualifying pair", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
-  s.harnesses.opencode.enabled = true;
   s.harnesses.commandcode.enabled = true;
   s.catalog = {
     "commandcode:demoted": { cost: 1, quality: 3, family: "a" },
-    "opencode:ok": { cost: 2, quality: 3, family: "b" },
+    "pi:ok": { cost: 2, quality: 3, family: "b" },
   };
   gateOutcomes("commandcode", "demoted", 2, 4); // 2/6 → effective 2 < medium's 3
-  expect(pickWorker(s, mkTicket(), [])).toEqual({ harness: "opencode", model: "ok" });
+  expect(pickWorker(s, mkTicket(), [])).toEqual({ harness: "pi", model: "ok" });
 });
 
 test("pickWorker: an unknown difficulty falls back to medium's minimum", () => {

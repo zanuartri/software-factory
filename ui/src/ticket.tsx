@@ -6,7 +6,7 @@ import { Btn, Dot, Empty, HARNESS_COLOR, HarnessTag, inputCls, Md, STATUS_META, 
 
 const STATUS_OPTS: Opt[] = Object.entries(STATUS_META).map(([value, m]) => ({ value, label: m.label, icon: <StatusIcon status={value} /> }));
 const PRIORITY_OPTS: Opt[] = [["p0", "Urgent"], ["p1", "High"], ["p2", "Medium"], ["p3", "Low"]].map(([value, label]) => ({ value, label }));
-const HARNESS_OPTS: Opt[] = ["any", "claude", "pi", "opencode", "commandcode"].map((h) => ({ value: h, label: h === "any" ? "Any (scheduler picks)" : h, icon: <span className="size-2 rounded-full" style={{ background: HARNESS_COLOR[h] }} /> }));
+const HARNESS_OPTS: Opt[] = ["any", "claude", "pi", "commandcode"].map((h) => ({ value: h, label: h === "any" ? "Any (scheduler picks)" : h, icon: <span className="size-2 rounded-full" style={{ background: HARNESS_COLOR[h] }} /> }));
 
 const TABS = [["brief", "Brief"], ["report", "Report"], ["runs", "Runs"], ["diff", "Diff"]] as const;
 const EDITABLE = ["Goal", "Context", "Acceptance", "Verify", "Timebox", "Forbidden"];

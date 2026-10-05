@@ -30,7 +30,7 @@ You are **read-only**. Read files, grep, and inspect git history. Do not edit, c
 
 - **FAIL** if there is any blocker or major finding. A blocker is wrong behavior, an unmet acceptance line, a fake
   test, or broken callers. A major finding is a real risk or a standing-order violation.
-- **PASS** if there are only minor findings, or none. List the minors anyway. The coordinator may turn them into follow-ups.
+- **PASS** if there are only minor findings, or none. List the minors anyway. The manager may turn them into follow-ups.
 - Every finding needs `file:line`, a severity (`blocker`/`major`/`minor`), what is wrong, and the concrete fix.
   "Consider improving X" is not a finding.
 - Don't pad. If it's good, say PASS with one line of why.

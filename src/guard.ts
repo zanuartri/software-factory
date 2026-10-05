@@ -1,4 +1,4 @@
-// One policy for every harness. CLI mode = PreToolUse hook (claude, commandcode); import mode = pi extension / opencode plugin.
+// One policy for every harness. CLI mode = PreToolUse hook (claude, commandcode); import mode = pi extension.
 // No FACTORY_RUN_ID in env → not a factory worker → allow everything.
 import { isAbsolute, relative, resolve } from "node:path";
 

@@ -99,9 +99,9 @@ function List({ options, isOn, onPick, searchable, multi, activeInit, onClose, f
   );
 }
 
-export function Select({ value, onChange, options, placeholder = "Select…", ariaLabel, variant = "input", renderValue, searchable, className = "", chevronClass = "" }: {
+export function Select({ value, onChange, options, placeholder = "Select…", ariaLabel, variant = "input", renderValue, searchable, className = "", chevronClass = "", disabled }: {
   value: string; onChange: (v: string) => void; options: Opt[]; placeholder?: string; ariaLabel: string;
-  variant?: keyof typeof triggerCls; renderValue?: (o: Opt | undefined) => ReactNode; searchable?: boolean; className?: string; chevronClass?: string;
+  variant?: keyof typeof triggerCls; renderValue?: (o: Opt | undefined) => ReactNode; searchable?: boolean; className?: string; chevronClass?: string; disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const close = () => { setOpen(false); pop.trigger.current?.focus(); };
@@ -109,9 +109,9 @@ export function Select({ value, onChange, options, placeholder = "Select…", ar
   const cur = options.find((o) => o.value === value);
   return (
     <>
-      <button ref={pop.trigger} type="button" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}
+      <button ref={pop.trigger} type="button" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel} disabled={disabled}
         onClick={() => setOpen((o) => !o)} onKeyDown={(e) => { if (e.key === "ArrowDown" && !open) { e.preventDefault(); setOpen(true); } }}
-        className={`inline-flex min-w-0 items-center gap-2 transition-colors ${triggerCls[variant]} ${className}`}>
+        className={`inline-flex disabled:pointer-events-none disabled:opacity-50 min-w-0 items-center gap-2 transition-colors ${triggerCls[variant]} ${className}`}>
         {renderValue ? renderValue(cur) : <>
           {cur?.icon}
           <span className={`min-w-0 flex-1 truncate text-left ${cur ? "" : "text-fg-subtle"}`}>{cur ? cur.label ?? cur.value : placeholder}</span>

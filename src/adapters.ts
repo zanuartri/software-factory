@@ -146,65 +146,6 @@ const pi: Adapter = {
   },
 };
 
-// ---------------------------------------------------------------- opencode (serve)
-const opencode: Adapter = {
-  caps: { liveSteer: false, abort: true, resume: true, oneProcPerTurn: false },
-  async start(o) {
-    const config = {
-      mcp: { factory: { type: "remote", url: o.mcpUrl, enabled: true } },
-      // explicit on every key: a headless "ask" would wait forever. Other worktrees are off-limits (isolation).
-      permission: { edit: o.role === "reviewer" ? "deny" : "allow", bash: o.role === "reviewer" ? "deny" : "allow", webfetch: "deny", external_directory: "deny", doom_loop: "deny" },
-    };
-    const p = Bun.spawn([...bin("opencode"), "serve", "--port", "0", "--hostname", "127.0.0.1"], {
-      cwd: o.cwd, env: { ...baseEnv(o), OPENCODE_CONFIG_CONTENT: JSON.stringify(config) }, stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true,
-    });
-    const log = transcript(o);
-    const url = await new Promise<string>((res, rej) => {
-      const t = setTimeout(() => rej(new Error("opencode serve did not report a port in 90s")), 90e3);
-      const seen = (l: string) => { log(JSON.stringify({ serve: l })); const m = l.match(/https?:\/\/127\.0\.0\.1:\d+/); if (m) { clearTimeout(t); res(m[0]); } };
-      lines(p.stdout, seen); lines(p.stderr, seen);
-    });
-    const api = (path: string, body?: any) => fetch(url + path, { method: body ? "POST" : "GET", headers: { "content-type": "application/json" }, body: body && JSON.stringify(body) });
-    let sid = o.resumeSession;
-    if (!sid) sid = (await (await api("/session", { title: o.runId })).json()).id as string;
-    o.onEvent({ type: "session", id: sid! });
-    const [providerID, ...rest] = (o.model ?? "").split("/");
-    const prompt = (text: string) => api(`/session/${sid}/prompt_async`, { parts: [{ type: "text", text }], ...(o.model ? { model: { providerID, modelID: rest.join("/") } } : {}) });
-    // SSE: session.idle marks the end of a turn
-    (async () => {
-      const res = await fetch(url + "/event");
-      let buf = "";
-      for await (const chunk of res.body!) {
-        buf += new TextDecoder().decode(chunk);
-        let i: number;
-        while ((i = buf.indexOf("\n\n")) >= 0) {
-          const frame = buf.slice(0, i); buf = buf.slice(i + 2);
-          const data = frame.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5)).join("");
-          const e = tryJson(data); if (!e) continue;
-          const props = e.properties ?? {};
-          if (props.sessionID && props.sessionID !== sid && props.info?.sessionID !== sid && props.part?.sessionID !== sid) continue;
-          if (e.type === "server.heartbeat") continue;
-          log(data);
-          // belt and braces: nobody can click "allow" in a headless run, so any permission prompt is rejected with a reason
-          if (e.type === "permission.asked") api(`/permission/${props.id}/reply`, { reply: "reject", message: "Headless factory worker: this action needs factory_ask (or is outside your worktree)." });
-          if (e.type === "message.part.updated" && props.part?.type === "tool" && props.part.state?.status === "running") o.onEvent({ type: "tool", name: props.part.tool });
-          if (e.type === "message.part.updated" && props.part?.type === "text" && props.part.time?.end) o.onEvent({ type: "text", text: props.part.text });
-          if (e.type === "session.idle") o.onEvent({ type: "turn_end" });
-          if (e.type === "session.error") o.onEvent({ type: "turn_end", error: JSON.stringify(props.error ?? {}) });
-        }
-      }
-    })().catch((err) => log(JSON.stringify({ sse_error: String(err) })));
-    p.exited.then((code) => o.onEvent({ type: "exit", code }));
-    await prompt(o.prompt);
-    return {
-      pid: p.pid,
-      async send(text) { await prompt(text); }, // queued by opencode after the current turn; factory tools piggyback meanwhile
-      async abort() { await api(`/session/${sid}/abort`, {}); },
-      kill() { killTree(p.pid); },
-    };
-  },
-};
-
 // ---------------------------------------------------------------- commandcode (-p NDJSON, one process per turn)
 const commandcode: Adapter = {
   caps: { liveSteer: false, abort: true, resume: true, oneProcPerTurn: true },
@@ -255,4 +196,4 @@ const commandcode: Adapter = {
   },
 };
 
-export const ADAPTERS: Record<Harness, Adapter> = { claude, pi, opencode, commandcode };
+export const ADAPTERS: Record<Harness, Adapter> = { claude, pi, commandcode };

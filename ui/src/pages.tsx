@@ -79,7 +79,7 @@ export function Issues({ ws, openTicket, toast }: { ws: Workspace; openTicket: (
                 </div>
               )}
               <p className="mt-6 rounded-lg bg-muted px-3 py-2 text-[12px] text-fg-muted">
-                Triage and ticketing happen in the coordinator: <code className="font-mono">/factory:issue</code>, <code className="font-mono">/factory:plan --issue {cur.id}</code> or <code className="font-mono">/factory:auto</code>.
+                Triage and ticketing happen in the manager: <code className="font-mono">/factory:issue</code>, <code className="font-mono">/factory:plan --issue {cur.id}</code> or <code className="font-mono">/factory:auto</code>.
               </p>
             </div>
           ) : <p className="pt-10 text-center text-[13px] text-fg-subtle">Select an issue</p>}
@@ -112,7 +112,7 @@ export function Rules({ ws, toast }: { ws: Workspace; toast: (m: string) => void
   );
 }
 
-const HARNESSES: Harness[] = ["claude", "pi", "opencode", "commandcode"];
+const HARNESSES: Harness[] = ["claude", "pi", "commandcode"];
 
 const Row = ({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) => (
   <div className="grid items-start gap-2 px-4 py-4 md:grid-cols-[220px_1fr] md:gap-6 md:px-5">

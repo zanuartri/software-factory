@@ -77,7 +77,7 @@ test("settingsPatch: array field still accepts valid JSON", () => {
 test("settingsPatch: does not mutate DEFAULT_SETTINGS", () => {
   settingsPatch(DEFAULT_SETTINGS, ["harnesses.pi.model=foo", "reviewer_order=claude,pi"]);
   expect(DEFAULT_SETTINGS.harnesses.pi.model).toBe("");
-  expect(DEFAULT_SETTINGS.reviewer_order).toEqual(["pi", "opencode", "commandcode", "claude"]);
+  expect(DEFAULT_SETTINGS.reviewer_order).toEqual(["pi", "commandcode", "claude"]);
 });
 
 test("settingsPatch: pair without '=' throws naming the bad arg", () => {

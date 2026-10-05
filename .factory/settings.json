@@ -23,16 +23,6 @@
         "opencode-go/mimo-v2.6-flash"
       ]
     },
-    "opencode": {
-      "enabled": true,
-      "model": "opencode-go/mimo-v2.6-flash",
-      "models": [
-        "opencode-go/deepseek-v4.1-flash",
-        "opencode-go/glm-5.3-flash",
-        "opencode-go/hy3",
-        "opencode-go/mimo-v2.6-flash"
-      ]
-    },
     "commandcode": {
       "enabled": true,
       "model": "deepseek/deepseek-v4.1-flash",
@@ -49,14 +39,12 @@
   "max_workers": 5,
   "reviewer_order": [
     "pi",
-    "opencode",
     "commandcode",
     "claude"
   ],
   "reviewer_models": {
     "claude": "claude-opus-5-5",
     "pi": "opencode-go/glm-5.3-flash",
-    "opencode": "opencode-go/deepseek-v4.1-flash",
     "commandcode": "z-ai/glm-5.3-flashx"
   },
   "verify_cmd": "bun install --frozen-lockfile && bun test src && bunx tsc -p . && cd ui && bun install --frozen-lockfile && bunx tsc -p . --noEmit && bun run build",
@@ -78,7 +66,7 @@
     },
     "commandcode:z-ai/glm-5.3-flashx": {
       "cost": 1.5,
-      "quality": 4,
+      "quality": 5,
       "family": "glm"
     },
     "pi:opencode-go/deepseek-v4.1-flash": {
@@ -97,26 +85,6 @@
       "family": "hunyuan"
     },
     "pi:opencode-go/glm-5.3-flash": {
-      "cost": 2.5,
-      "quality": 3,
-      "family": "glm"
-    },
-    "opencode:opencode-go/deepseek-v4.1-flash": {
-      "cost": 2,
-      "quality": 3,
-      "family": "deepseek"
-    },
-    "opencode:opencode-go/mimo-v2.6-flash": {
-      "cost": 2,
-      "quality": 3,
-      "family": "mimo"
-    },
-    "opencode:opencode-go/hy3": {
-      "cost": 2,
-      "quality": 3,
-      "family": "hunyuan"
-    },
-    "opencode:opencode-go/glm-5.3-flash": {
       "cost": 2.5,
       "quality": 3,
       "family": "glm"
