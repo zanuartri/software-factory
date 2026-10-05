@@ -13,6 +13,18 @@ const json = (d: unknown, status = 200) => Response.json(d, { status });
 const body = async (req: Request) => (req.headers.get("content-length") === "0" ? {} : req.json().catch(() => ({})));
 const wsPath = (id: string) => sup.mustWs(id).path;
 
+/** The workspace's manager pane in herdr. Found by session id first; `/clear` gives the pane a new session id, so the herdr name
+ *  (set when we start or first see the pane) re-links it and the workspace follows to the new session. */
+async function managerAgent(w: ReturnType<typeof sup.mustWs>) {
+  const name = herdr.agentName(w.id);
+  let a = w.manager ? await herdr.findAgent(w.manager).catch(() => null) : null;
+  if (a) { if (a.name !== name) herdr.nameAgent(a.pane_id, name).catch(() => {}); return a; }
+  a = await herdr.findByName(name).catch(() => null);
+  const sid = a?.agent_session?.value;
+  if (a && sid && sid !== w.manager) sup.attachManager(w.id, sid, true);
+  return a;
+}
+
 function runDetail(r: Run) {
   const dir = join(HOME, "runs", r.ws, r.ticket, r.id);
   const read = (f: string) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f), "utf8") : "");
@@ -50,9 +62,9 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   // chat = the manager's Claude session inside herdr: transcript for reading, `herdr agent prompt` for writing
   "/api/ws/:ws/chat": {
     GET: async ({ params }) => {
-      const w = sup.mustWs(params.ws);
+      const agent = await managerAgent(sup.mustWs(params.ws));
+      const w = sup.mustWs(params.ws); // re-read: a /clear re-links the workspace to the pane's new session
       if (!w.manager) return json({ session: null, status: "none", messages: [] });
-      const agent = await herdr.findAgent(w.manager).catch(() => null);
       const { msgs, model } = herdr.readChat(w.manager);
       const screen = agent ? await herdr.readScreen(agent.pane_id) : "";
       const usage = agent ? herdr.usageFrom(screen) : null;
@@ -60,7 +72,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       return json({ session: w.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, prompt, messages: msgs });
     },
     POST: async (req) => {
-      const w = sup.mustWs(req.params.ws), agent = w.manager ? await herdr.findAgent(w.manager) : null;
+      const w = sup.mustWs(req.params.ws), agent = await managerAgent(w);
       if (!agent) throw new Error("manager session is not running in herdr — start or resume one");
       await herdr.prompt(agent.pane_id, (await body(req)).text);
       return json({ ok: true });
@@ -70,7 +82,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   /** Answer whatever the session is waiting on: { keys?, text?, enter? } — see herdr.answer. */
   "/api/ws/:ws/chat/answer": {
     POST: async (req) => {
-      const w = sup.mustWs(req.params.ws), agent = w.manager ? await herdr.findAgent(w.manager) : null;
+      const w = sup.mustWs(req.params.ws), agent = await managerAgent(w);
       if (!agent) throw new Error("manager session is not running in herdr");
       await herdr.answer(agent.pane_id, await body(req));
       return json({ ok: true });
@@ -78,7 +90,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   },
   "/api/ws/:ws/chat/interrupt": {
     POST: async ({ params }) => {
-      const w = sup.mustWs(params.ws), agent = w.manager ? await herdr.findAgent(w.manager) : null;
+      const w = sup.mustWs(params.ws), agent = await managerAgent(w);
       if (agent) await herdr.interrupt(agent.pane_id);
       return json({ ok: true });
     },
@@ -87,7 +99,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   "/api/ws/:ws/chat/start": {
     POST: async (req) => {
       const w = sup.mustWs(req.params.ws), b = await body(req);
-      const session = await herdr.startClaude(w.path, w.name, b.resume ? w.manager ?? undefined : undefined);
+      const session = await herdr.startClaude(w.path, w.name, herdr.agentName(w.id), b.resume ? w.manager ?? undefined : undefined);
       sup.attachManager(w.id, session, true);
       return json({ session });
     },

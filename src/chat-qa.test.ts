@@ -23,3 +23,10 @@ test("AskUserQuestion: the answers are attached to the question once they arrive
   expect(qa[1].skipped).toBe(true);
   expect(qa[2].qa![0].answer).toBeNull(); // still pending
 });
+
+test("agentName: a valid, stable herdr agent name for any workspace id", async () => {
+  const { agentName } = await import("./herdr");
+  expect(agentName("software-factory")).toBe("factory-software-factory");
+  expect(agentName("My Repo.v2")).toMatch(/^[a-z][a-z0-9_-]{0,31}$/);
+  expect(agentName("x".repeat(80)).length).toBe(32);
+});

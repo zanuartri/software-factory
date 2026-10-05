@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export type HerdrAgent = { pane_id: string; agent: string; agent_status: string; cwd: string; agent_session?: { value?: string } };
+export type HerdrAgent = { pane_id: string; name?: string; agent: string; agent_status: string; cwd: string; agent_session?: { value?: string } };
 
 async function herdr(...args: string[]) {
   const p = Bun.spawn(["herdr", ...args], { stdout: "pipe", stderr: "pipe", windowsHide: true });
@@ -14,16 +14,19 @@ async function herdr(...args: string[]) {
 }
 
 export const listAgents = async (): Promise<HerdrAgent[]> => (await herdr("agent", "list")).agents ?? [];
+/** The manager's herdr name: it follows the pane, so it survives /clear (new session id) and daemon restarts. */
+export const agentName = (wsId: string) => `factory-${wsId.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`.slice(0, 32);
+export const findByName = async (name: string) => (await listAgents()).find((a) => a.agent === "claude" && a.name === name) ?? null;
+export const nameAgent = (pane: string, name: string) => herdr("agent", "rename", pane, name);
 export const findAgent = async (session: string) => (await listAgents()).find((a) => a.agent === "claude" && a.agent_session?.value === session) ?? null;
 
 export const prompt = (pane: string, text: string) => herdr("agent", "prompt", pane, text);
 export const interrupt = (pane: string) => herdr("agent", "send-keys", pane, "esc");
 
 /** New herdr workspace in `cwd` running claude (optionally `--resume <session>`); resolves to the claude session id once herdr reports it. */
-export async function startClaude(cwd: string, label: string, resume?: string) {
+export async function startClaude(cwd: string, label: string, name: string, resume?: string) {
   const r = await herdr("workspace", "create", "--cwd", cwd, "--label", label, "--no-focus");
   const pane: string = r.root_pane.pane_id;
-  const name = `mgr-${Date.now().toString(36)}`;
   // A folder claude hasn't seen asks "trust this folder?", so `start` can fail as not-ready while the pane lives on; handled in the loop below.
   const startErr = await herdr("agent", "start", name, "--kind", "claude", "--pane", pane, ...(resume ? ["--", "--resume", resume] : [])).then(() => null, (e: Error) => e);
   for (let i = 0; i < 60; i++) { // the session id shows up a moment after the agent is detected
