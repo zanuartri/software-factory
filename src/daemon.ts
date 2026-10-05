@@ -99,6 +99,12 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   "/api/ws/:ws/chat/start": {
     POST: async (req) => {
       const w = sup.mustWs(req.params.ws), b = await body(req);
+      const old = await managerAgent(w); // retire the previous manager pane: it would otherwise linger in herdr and keep the factory-<ws> name
+      if (old) {
+        if (old.agent_status === "working") throw new Error("the current manager session is still working — interrupt it first");
+        await herdr.closePane(old.pane_id);
+        await Bun.sleep(500);
+      }
       const session = await herdr.startClaude(w.path, w.name, herdr.agentName(w.id), b.resume ? w.manager ?? undefined : undefined);
       sup.attachManager(w.id, session, true);
       return json({ session });

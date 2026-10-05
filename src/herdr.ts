@@ -166,3 +166,6 @@ export async function answer(pane: string, a: Answer) {
   if (a.text) { if (keys.length) await Bun.sleep(250); await herdr("pane", "send-text", pane, a.text); }
   if (a.enter) { if (a.text) await Bun.sleep(150); await herdr("agent", "send-keys", pane, "enter"); }
 }
+
+/** Close one pane (the agent in it exits). Used to retire the previous manager session before a new one takes its name. */
+export const closePane = (pane: string) => herdr("pane", "close", pane);
