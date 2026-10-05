@@ -3,7 +3,7 @@ import { useState } from "react";
 
 export type PromptOption = { n: number | null; label: string; desc?: string; checked: boolean | null; chosen: boolean; focused: boolean; input: boolean };
 export type PromptTab = { label: string; done: boolean; submit: boolean; active: boolean };
-export type Prompt = { title: string; context: string; tabs: PromptTab[]; options: PromptOption[]; multi: boolean; footer: string; amend: boolean; screen: string };
+export type Prompt = { title: string; context: string; tabs: PromptTab[]; options: PromptOption[]; multi: boolean; footer: string; amend: boolean; screen: string; preview: string | null; notes: boolean };
 export type Answer = { keys?: string[]; text?: string; enter?: boolean };
 
 const rep = (k: string, n: number) => Array.from({ length: Math.abs(n) }, () => k);
@@ -13,13 +13,17 @@ export function AskCard({ prompt, send, busy }: { prompt: Prompt | { raw: string
   const [typing, setTyping] = useState<number | null>(null);
   const [text, setText] = useState("");
   const [amend, setAmend] = useState(false);
+  const [noting, setNoting] = useState(false);
+  const [noteText, setNoteText] = useState("");
   const [note, setNote] = useState("");
   const [typed, setTyped] = useState<Record<string, string>>({}); // what was typed into each type-in option, so it stays visible after Enter
   if ("raw" in prompt) return <RawCard screen={prompt.raw} send={send} busy={busy} />;
 
   const focused = Math.max(0, prompt.options.findIndex((o) => o.focused));
+  const previewMode = prompt.preview !== null; // choices with previews: the cursor decides what the preview shows, Enter selects
   const pick = (i: number) => {
     const o = prompt.options[i];
+    if (previewMode) { if (i !== focused) send({ keys: rep(i > focused ? "down" : "up", i - focused) }); return; }
     if (o.input) { setTyping(i); setText(""); return; }
     if (o.n != null) return send({ keys: [String(o.n)] });
     send({ keys: [...rep(i > focused ? "down" : "up", i - focused), "enter"] }); // unnumbered menu (folder trust): move the cursor, then Enter
@@ -55,7 +59,7 @@ export function AskCard({ prompt, send, busy }: { prompt: Prompt | { raw: string
               </form>
             ) : (
               <button type="button" disabled={busy} onClick={() => pick(i)}
-                className={`flex w-full items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors hover:bg-hover disabled:opacity-60 ${o.chosen || o.checked ? "border-border-strong bg-muted" : "border-border"}`}>
+                className={`flex w-full items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors hover:bg-hover disabled:opacity-60 ${previewMode && i === focused ? "border-primary bg-muted" : o.chosen || o.checked ? "border-border-strong bg-muted" : "border-border"}`}>
                 {prompt.multi && o.checked !== null
                   ? (o.checked ? <SquareCheck className="mt-px size-4 shrink-0 text-primary" /> : <Square className="mt-px size-4 shrink-0 text-fg-subtle" />)
                   : <span className="mt-px grid size-[18px] shrink-0 place-items-center rounded-md bg-muted font-mono text-[11px] text-fg-muted">{o.n ?? "•"}</span>}
@@ -70,6 +74,19 @@ export function AskCard({ prompt, send, busy }: { prompt: Prompt | { raw: string
         ))}
       </ul>
 
+      {previewMode && (
+        <div className="mt-2.5">
+          <p className="mb-1 text-[11.5px] text-fg-subtle">Preview · {prompt.options[focused]?.label}</p>
+          <pre className="max-h-56 overflow-auto rounded-xl bg-muted px-3 py-2 font-mono text-[11.5px] leading-[1.15] text-fg-muted">{prompt.preview}</pre>
+        </div>
+      )}
+      {noting && (
+        <form onSubmit={(e) => { e.preventDefault(); if (noteText.trim()) { send({ keys: ["n"], text: noteText, enter: true }); setNoting(false); setNoteText(""); } }} className="mt-2 flex items-center gap-1.5 rounded-xl border border-border-strong bg-bg py-1 pr-1 pl-3">
+          <input autoFocus value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder={`Notes on ${prompt.options[focused]?.label ?? "this option"}, then Enter selects it…`} aria-label="notes" className="no-ring h-7 min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-fg-subtle" />
+          <button type="submit" disabled={busy || !noteText.trim()} aria-label="Select with notes" className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg disabled:opacity-25"><CornerDownLeft className="size-3.5" /></button>
+        </form>
+      )}
+
       {amend && (
         <form onSubmit={(e) => { e.preventDefault(); if (note.trim()) { send({ keys: ["tab"], text: note, enter: true }); setAmend(false); setNote(""); } }} className="mt-2 flex items-center gap-1.5 rounded-xl border border-border-strong bg-bg py-1 pr-1 pl-3">
           <input autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="Yes, and tell Claude what to do next…" aria-label="instruction" className="no-ring h-7 min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-fg-subtle" />
@@ -80,6 +97,8 @@ export function AskCard({ prompt, send, busy }: { prompt: Prompt | { raw: string
       <div className="mt-3 flex items-center gap-1.5">
         <button type="button" disabled={busy} onClick={() => send({ keys: ["esc"] })} className={`${btn} text-fg-muted hover:bg-hover hover:text-fg`} title="Esc — skip / cancel"><X className="size-3.5" />Skip</button>
         {prompt.amend && <button type="button" onClick={() => setAmend((a) => !a)} className={`${btn} text-fg-muted hover:bg-hover hover:text-fg`} title="Tab — approve with an instruction">Add instruction</button>}
+        {prompt.notes && <button type="button" onClick={() => setNoting((n) => !n)} className={`${btn} text-fg-muted hover:bg-hover hover:text-fg`} title="n — add notes to the highlighted option">Add notes</button>}
+        {previewMode && <button type="button" disabled={busy} onClick={() => send({ keys: ["enter"] })} className={`${btn} ml-auto bg-primary text-primary-fg hover:opacity-90`}>Select<CornerDownLeft className="size-3.5" /></button>}
         {prompt.multi && <button type="button" disabled={busy} onClick={() => send({ keys: ["right"] })} className={`${btn} ml-auto bg-primary text-primary-fg hover:opacity-90`}>Next<ArrowRight className="size-3.5" /></button>}
       </div>
     </div>

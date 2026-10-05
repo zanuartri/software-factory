@@ -7,6 +7,8 @@ export type PromptTab = { label: string; done: boolean; submit: boolean; active:
 export type Prompt = {
   title: string; context: string; tabs: PromptTab[]; options: PromptOption[]; multi: boolean;
   footer: string; amend: boolean; screen: string;
+  /** side-by-side preview of the option the cursor is on (previews change as the cursor moves) */
+  preview: string | null; notes: boolean;
 };
 
 const RULE = /^\s*[─╌━]{5,}.*$/; // a solid or dashed divider (the session name can trail a rule)
@@ -29,9 +31,16 @@ function parseTabs(line: string, active: string | null): PromptTab[] {
 }
 
 export function parsePrompt(plain: string, ansi = ""): Prompt | null {
-  const lines = plain.split("\n").map((l) => l.replace(/\s+$/, ""));
+  const raw = plain.split("\n").map((l) => l.replace(/\s+$/, ""));
+  // options with a preview are drawn two-column: choices on the left, a box with the focused option's preview on the right
+  let boxCol = -1;
+  for (const l of raw) { const m = l.match(/\S\s{2,}(┌─{3,}┐)$/); if (m) { boxCol = l.length - m[1].length; break; } }
+  const inBox = (l: string) => boxCol >= 0 && "┌│└".includes(l[boxCol] ?? " ") && !l.slice(Math.max(0, boxCol - 2), boxCol).trim();
+  const lines = raw.map((l) => (inBox(l) ? l.slice(0, boxCol).replace(/\s+$/, "") : l));
+  const previewRows = raw.filter(inBox).map((l) => l.slice(boxCol)).filter((l) => l.startsWith("│"));
+  const preview = previewRows.length ? previewRows.map((l) => l.replace(/^│ ?/, "").replace(/ ?│$/, "").replace(/\s+$/, "")).join("\n").replace(/\s+$/, "") : null;
   let f = -1;
-  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) if (FOOTER.test(lines[i])) { f = i; break; }
+  for (let i = raw.length - 1; i >= Math.max(0, raw.length - 30); i--) if (FOOTER.test(raw[i])) { f = i; break; }
   if (f < 0) {
     // some screens (the review step) print no footer: accept a numbered menu with the ❯ cursor sitting at the bottom of the screen
     let last = lines.length - 1;
@@ -66,9 +75,13 @@ export function parsePrompt(plain: string, ansi = ""): Prompt | null {
     opts = block.map((l, k) => ({ i: top + 1 + k, n: null, text: l.replace(/^\s*❯\s*/, "").trim(), focused: /^\s*❯/.test(l) }));
   }
 
+  if (!opts.some((o) => /^chat about this$/i.test(o.text))) { // unnumbered trailing choice (preview layout)
+    const c = lines.findIndex((l, i) => i > opts.at(-1)!.i && i < f && /^\s*(❯\s*)?Chat about this\s*$/.test(l));
+    if (c >= 0) opts.push({ i: c, n: null, text: "Chat about this", focused: /❯/.test(lines[c]) });
+  }
   const options: PromptOption[] = opts.map((o, k) => {
     const next = k + 1 < opts.length ? opts[k + 1].i : f;
-    const desc = lines.slice(o.i + 1, next).filter((l) => l.trim() && !RULE.test(l) && !/^\s*(Submit|\d+\.)\s*$/.test(l) && !NUMBERED.test(l)).map((l) => l.trim()).join(" ");
+    const desc = lines.slice(o.i + 1, next).filter((l) => l.trim() && !/^\s*Notes:/.test(l) && !RULE.test(l) && !/^\s*(Submit|\d+\.)\s*$/.test(l) && !NUMBERED.test(l)).map((l) => l.trim()).join(" ");
     let label = o.text, checked: boolean | null = null;
     const box = label.match(/^\[([ ✔xX])\]\s*(.*)$/);
     if (box) { checked = box[1] !== " "; label = box[2]; }
@@ -82,11 +95,11 @@ export function parsePrompt(plain: string, ansi = ""): Prompt | null {
   let t = first - 1;
   while (t >= 0 && !lines[t].trim()) t--;
   const titleLines: string[] = [];
-  while (t >= 0 && lines[t].trim() && !RULE.test(lines[t]) && !/^\s*←.*→\s*$/.test(lines[t]) && !/^\s*[●⚠→]/.test(lines[t])) titleLines.unshift(lines[t--].trim());
+  while (t >= 0 && lines[t].trim() && !RULE.test(lines[t]) && !/^\s*←.*→\s*$/.test(lines[t]) && !/^\s*[●⚠→☐☒✔]/.test(lines[t])) titleLines.unshift(lines[t--].trim());
   let tabLine: string | null = null;
   const ctx: string[] = [];
   for (let i = t; i >= Math.max(0, t - 80); i--) { // context runs up to the last chat message; the tab bar may sit among it
-    if (/^[●✻❯]/.test(lines[i])) break;
+    if (/^[●✻❯]/.test(lines[i]) || /^\s*[☐☒✔]\s/.test(lines[i])) break; // a lone "☐ Header" line (single question, no tab bar) ends the context too
     if (/^\s*←.*→\s*$/.test(lines[i])) { tabLine = lines[i]; break; }
     if (!RULE.test(lines[i])) ctx.unshift(lines[i]);
   }
@@ -100,6 +113,7 @@ export function parsePrompt(plain: string, ansi = ""): Prompt | null {
     context: ctx.map((l) => l.slice(Number.isFinite(indent) && indent < 99 ? indent : 0)).join("\n"),
     tabs: tabLine ? parseTabs(tabLine, activeTabLabel(ansiLines)) : [],
     options, multi: options.some((o) => o.checked !== null),
-    footer: (lines[f] ?? "").trim(), amend: /Tab to amend/i.test(lines[f] ?? ""), screen: plain,
+    footer: (raw[f] ?? "").trim(), amend: /Tab to amend/i.test(raw[f] ?? ""), screen: plain,
+    preview: preview && options.some((o) => o.focused) ? preview : null, notes: /n to add notes/i.test(raw[f] ?? ""),
   };
 }

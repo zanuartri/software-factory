@@ -61,3 +61,19 @@ test("review step prints no footer: the ❯ cursor on a bottom-of-screen menu is
   // chat output that merely contains a numbered list is not a prompt
   expect(parsePrompt(screen("● Steps:", "  1. do a", "  2. do b", "", R, "❯", R))).toBeNull();
 });
+
+test("options with a preview: the right-hand box belongs to the focused option, notes are offered", () => {
+  const p = parsePrompt(screen(
+    "❯ Call AskUserQuestion", R, " ☐ Layout", "Which layout?",
+    "❯ 1. Kanban                       ┌──────────────────────────────────────────┐",
+    "  2. List                         │ ┌───────┬───────┬───────┐                │",
+    "  3. Table                        │ │ To Do │ Doing │ Done  │                │",
+    "                                  │ └───────┴───────┴───────┘                │",
+    "                                  └──────────────────────────────────────────┘",
+    "                                  Notes: press n to add notes",
+    R, "  Chat about this", "Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel"))!;
+  expect(p.options.map((o) => [o.n, o.label, o.desc, o.focused])).toEqual([[1, "Kanban", undefined, true], [2, "List", undefined, false], [3, "Table", undefined, false], [null, "Chat about this", undefined, false]]);
+  expect(p.preview).toBe("┌───────┬───────┬───────┐\n│ To Do │ Doing │ Done  │\n└───────┴───────┴───────┘");
+  expect(p.notes).toBe(true);
+  expect(p.title).toBe("Which layout?");
+});
