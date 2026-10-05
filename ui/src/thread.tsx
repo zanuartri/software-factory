@@ -9,7 +9,29 @@ export type ToolInfo = {
   result?: string; task?: string; agent?: AgentInfo; todos?: { content: string; status: string }[]; events?: string[];
 };
 export type Notice = { kind: "task" | "command" | "message"; status?: string; title: string; body?: string };
-export type Msg = { id: string; role: "user" | "assistant" | "tool" | "notice"; text: string; qa?: QA[]; skipped?: boolean; tool?: ToolInfo; notice?: Notice };
+export type Msg = { id: string; role: "user" | "assistant" | "tool" | "notice"; text: string; images?: number; qa?: QA[]; skipped?: boolean; tool?: ToolInfo; notice?: Notice };
+/** A user message. `@<path>` mentions of uploaded images render as thumbnails; `images` counts images pasted in the terminal. */
+export function UserBubble({ text, images = 0, queued, local = [] }: { text: string; images?: number; queued?: boolean; local?: string[] }) {
+  const urls: string[] = [];
+  const rest = text.replace(/@(?:"([^"]+)"|(\S+))/g, (m, a, b) => {
+    const p = (a ?? b) as string, seg = p.replace(/\\/g, "/").split("/");
+    if (seg.at(-3) !== "uploads") return m;
+    urls.push(`/api/uploads/${seg.at(-2)}/${seg.at(-1)}`);
+    return "";
+  }).trim();
+  const imgs = local.length ? local : urls;
+  return (
+    <div className={`ml-auto max-w-[85%] ${queued ? "opacity-70" : ""}`}>
+      <div className="rounded-2xl rounded-br-md bg-bubble px-3.5 py-2 text-[13px] break-words whitespace-pre-wrap text-on-bubble">
+        {imgs.length > 0 && <div className="mb-1.5 flex flex-wrap gap-1.5">{imgs.map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer"><img src={u} alt="attached" className="max-h-40 max-w-full rounded-lg object-cover" /></a>)}</div>}
+        {images > 0 && !imgs.length && <div className="mb-1 text-[12px] opacity-80">{images} image{images > 1 ? "s" : ""} attached</div>}
+        {rest}
+      </div>
+      {queued && <div className="mt-0.5 mr-1 text-right text-[10.5px] text-fg-subtle">Queued — delivered at Claude's next pause</div>}
+    </div>
+  );
+}
+
 export type Activity = { running: { name: string; detail: string } | null; background: number };
 
 const ICON: Record<string, typeof Wrench> = { Bash: SquareTerminal, PowerShell: SquareTerminal, Read: FileText, Write: FileText, Edit: FileText, NotebookEdit: FileText, Grep: Search, Glob: Search, ToolSearch: Search, WebFetch: Globe, WebSearch: Globe, Monitor: Radio };

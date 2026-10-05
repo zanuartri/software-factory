@@ -310,7 +310,8 @@ export async function spawnWorker(ws: string, ticketId: string, o: { harness?: H
     if (!isLive(id)) return;
     steer(id, "⏰ Timebox expired. Stop starting new work: commit what is verified, then factory_submit (ready if acceptance is met, otherwise blocked with partial findings) within 10 minutes.");
     emit(ws, "run.timebox", { minutes: tb / 60e3 }, { ticket: t.id, run: id, manager: true });
-    addTimer(id, 10 * 60e3, () => isLive(id) && !submitted.has(id) && finishRun(id, "failed", "timebox exceeded"));
+    // a worker that ignores the wrap-up is parked, not failed: its work is intact and `factory tell` resumes it
+    addTimer(id, 10 * 60e3, () => isLive(id) && !submitted.has(id) && blockTicket(getRun(id)!, `timebox exceeded — resume with \`factory tell ${t.id}\``));
   });
   emit(ws, "run.started", { harness, model, attempt, branch }, { ticket: t.id, run: id });
   return getRun(id)!;
@@ -489,9 +490,9 @@ async function gate(workerRunId: string, report: string) {
   if (untrackedInScope.length) findings.push(`Untracked files inside scope were never committed: ${untrackedInScope.join(", ")}. Commit or delete them.`);
   const committed = (await git.gitAsync(r.worktree!, "diff", "--name-only", `${s.base_branch}...HEAD`)).out.split("\n").filter(Boolean);
   const outOfScope = committed.filter((f) => !inScope(f, t.scope_paths));
-  if (outOfScope.length) findings.push(`Committed files outside scope_paths ${JSON.stringify(t.scope_paths)}: ${outOfScope.join(", ")}. Revert them or ask to widen scope.`);
   if ((await git.remoteRefsAsync(w.path)) !== remoteSnap.get(r.id)) findings.push("Remote refs changed during the run — workers must not push.");
-  if (!committed.length) findings.push("No committed changes vs base.");
+  const noCodeExpected = t.tags.some((g) => /^(research|investigation|spike)$/i.test(g)); // a written answer is a valid deliverable
+  if (!committed.length && !noCodeExpected) findings.push("No committed changes vs base.");
   const structuralOk = !findings.length;
 
   // 2. independent verify
@@ -507,12 +508,12 @@ async function gate(workerRunId: string, report: string) {
   // 3. cross-family review (only worth paying for when the cheap checks pass)
   let verdict: { verdict: "PASS" | "FAIL"; findings: string } | null = null;
   if (!findings.length) {
-    verdict = await review(r, t, s, report, verifyLog);
+    verdict = await review(r, t, s, report, verifyLog, outOfScope);
     writeFileSync(join(dir, "review.md"), `${verdict.verdict}\n\n${verdict.findings}`);
     if (verdict.verdict !== "PASS") findings.push(`Reviewer findings:\n${verdict.findings}`);
   }
 
-  const gateMd = `### Gate (attempt ${r.attempt})\n- scope/commit/push checks: ${structuralOk ? "ok" : "FAIL"}\n- verify:\n${verifyLog || "  (no commands)\n"}- review: ${verdict ? verdict.verdict : "skipped"}\n- evidence: \`${dir}\``;
+  const gateMd = `### Gate (attempt ${r.attempt})\n- scope/commit/push checks: ${structuralOk ? "ok" : "FAIL"}${outOfScope.length ? `\n- touched outside scope_paths (reviewer judged): ${outOfScope.join(", ")}` : ""}\n- verify:\n${verifyLog || "  (no commands)\n"}- review: ${verdict ? verdict.verdict : "skipped"}\n- evidence: \`${dir}\``;
   if (!findings.length) {
     store.updateTicket(w.path, t.id, { status: "in_review", sections: { Report: `${report}\n\n${gateMd}\n\n${verdict?.findings ?? ""}` } } as any);
     emit(r.ws, "gate.passed", { attempt: r.attempt, head: git.head(r.worktree!) }, { ...meta, manager: true });
@@ -534,7 +535,7 @@ async function gate(workerRunId: string, report: string) {
   await sendOrResume(r.id, gateFailPrompt(r.attempt, s.max_attempts, findings.join("\n\n")));
 }
 
-async function review(worker: Run, t: store.Ticket, s: store.Settings, report: string, verifyLog: string) {
+async function review(worker: Run, t: store.Ticket, s: store.Settings, report: string, verifyLog: string, outOfScope: string[]) {
   const w = getWs(worker.ws)!;
   const { harness, model } = pickReviewer(s, { harness: worker.harness, model: worker.model ?? "" });
   const stat = git.git(worker.worktree!, "diff", "--stat", `${s.base_branch}...HEAD`).out;
@@ -551,7 +552,7 @@ async function review(worker: Run, t: store.Ticket, s: store.Settings, report: s
     setTimeout(() => res({ verdict: "FAIL", findings: "Reviewer timed out after 20 minutes." }), 20 * 60e3);
   });
   const body = diff.length > 80000 ? `${stat}\n\n(diff truncated — read files directly)\n${diff.slice(0, 80000)}` : `${stat}\n\n${diff}`;
-  await startAdapter(rv, reviewerPrompt(t, store.loadRules(w.path), { diff: body, verifyLog, workerSummary: report, implementer: `${worker.harness}/${worker.model ?? "default"}` }), {});
+  await startAdapter(rv, reviewerPrompt(t, store.loadRules(w.path), { diff: body, verifyLog, workerSummary: report, outOfScope, implementer: `${worker.harness}/${worker.model ?? "default"}` }), {});
   const v = await verdict;
   verdictWaiters.delete(id);
   finishRun(id, "done");

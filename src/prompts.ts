@@ -1,9 +1,22 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ticket } from "./store";
 
 export const ROOT = join(import.meta.dir, "..");
 const skill = (name: string) => readFileSync(join(ROOT, "plugin", "skills", name, "SKILL.md"), "utf8").replace(/^---[\s\S]*?---\s*/, "");
+
+/** Personas are short skills (plugin/skills/persona-<name>) appended to the worker prompt. A ticket tag named after one picks it;
+ *  otherwise the title's wording does. Advisory flavour only: nothing depends on a match. */
+const PERSONA_WORDS: [string, RegExp][] = [
+  ["bug", /\b(bug|fix|hotfix|regression|crash)/i], ["ui", /\b(ui|frontend|css|layout|a11y|accessib)/i], ["refactor", /\b(refactor|clean ?up|restructure)/i],
+  ["test", /\b(tests?|coverage)\b/i], ["research", /\b(research|investigat|spike|analy[sz]e)/i], ["feature", /\b(feature|add|implement|support)\b/i],
+];
+export function personasFor(t: Pick<Ticket, "tags" | "title">): string[] {
+  const have = (n: string) => existsSync(join(ROOT, "plugin", "skills", `persona-${n}`, "SKILL.md"));
+  const byTag = PERSONA_WORDS.map(([n]) => n).filter((n) => t.tags.includes(n) && have(n));
+  const picked = byTag.length ? byTag : PERSONA_WORDS.filter(([n, re]) => re.test(t.title) && have(n)).map(([n]) => n);
+  return picked.slice(0, 2);
+}
 
 const brief = (t: Ticket) =>
   `# Ticket ${t.id}: ${t.title}\npriority: ${t.priority} · tags: ${t.tags.join(", ") || "-"} · scope_paths: ${JSON.stringify(t.scope_paths)}\n\n` +
@@ -13,7 +26,8 @@ const brief = (t: Ticket) =>
 export const WORKER_MARK = "# You are a factory worker";
 
 export function workerPrompt(t: Ticket, rules: string, ctx: { branch: string; base: string; attempt: number; worktree: string }) {
-  return `${skill("factory-worker")}
+  const personas = personasFor(t).map((n) => skill(`persona-${n}`).trim());
+  return `${skill("worker")}${personas.length ? `\n\n---\n${personas.join("\n\n")}` : ""}
 
 ---
 # Standing orders (verbatim from .factory/rules.md — obey every line)
@@ -30,8 +44,8 @@ ${brief(t)}
 Begin with the Plan phase now. Call factory_report at every phase boundary.`;
 }
 
-export function reviewerPrompt(t: Ticket, rules: string, ctx: { diff: string; verifyLog: string; workerSummary: string; implementer: string }) {
-  return `${skill("factory-reviewer")}
+export function reviewerPrompt(t: Ticket, rules: string, ctx: { diff: string; verifyLog: string; workerSummary: string; implementer: string; outOfScope?: string[] }) {
+  return `${skill("reviewer")}
 
 ---
 # Standing orders of this repo
@@ -48,7 +62,11 @@ ${ctx.workerSummary || "-"}
 
 ## Daemon verify results (already executed independently)
 ${ctx.verifyLog}
-
+${ctx.outOfScope?.length ? `
+## Files changed outside the ticket's scope_paths
+${ctx.outOfScope.map((f) => `- ${f}`).join("\n")}
+scope_paths is advisory: judge whether each is a justified, necessary part of the change (a test, a shared helper, a caller). Flag only the ones that are drive-by or risky.
+` : ""}
 ## Diff vs base
 \`\`\`diff
 ${ctx.diff}

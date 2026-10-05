@@ -3,7 +3,7 @@ description: Review tickets in in_review and auto-merge the green ones into the 
 argument-hint: "[T-1 T-2 ...] (default: all in_review)"
 ---
 
-Load the `factory-manager` skill first. Apply its **review and merge policy**.
+Load the `manager` skill first. Apply its **review and merge policy**.
 
 For each ticket in review (`$ARGUMENTS`, or `factory ticket list --status in_review`), in dependency order:
 

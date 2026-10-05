@@ -1,14 +1,14 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { check, liveScope, reportBlock } from "./guard";
+import { check, reportBlock } from "./guard";
 
 const wt = join(process.cwd(), "wt");
 const ctx = { worktree: wt, scope: ["src/auth/**", "tests/auth"], role: "worker" as const };
 
-test("writes must stay in worktree and scope", () => {
+test("writes must stay in the worktree; scope_paths is advisory, not a wall", () => {
   expect(check("Write", { file_path: join(wt, "src/auth/a.ts") }, ctx).allow).toBe(true);
   expect(check("edit", { path: "tests/auth/x.test.ts" }, ctx).allow).toBe(true);
-  expect(check("Edit", { file_path: join(wt, "src/other.ts") }, ctx).allow).toBe(false);
+  expect(check("Edit", { file_path: join(wt, "src/other.ts") }, ctx).allow).toBe(true); // outside scope: allowed, the reviewer judges it
   expect(check("write", { filePath: join(wt, "..", "evil.ts") }, ctx).allow).toBe(false);
   expect(check("Write", { file_path: join(wt, "src/auth/.env") }, ctx).allow).toBe(false);
 });
@@ -81,7 +81,6 @@ test("reviewer is read-only", () => {
   expect(check("Bash", { command: "bun test" }, r).allow).toBe(true);
 });
 
-const liveCtx = { worktree: wt, scope: ["src/auth/**"], role: "worker" as const };
 const useEnv = (url: string) => { process.env.FACTORY_URL = url; process.env.FACTORY_RUN_ID = "run-1"; process.env.FACTORY_TOKEN = "tok"; };
 const unsetEnv = () => { for (const k of ["FACTORY_URL", "FACTORY_RUN_ID", "FACTORY_TOKEN"]) delete process.env[k]; };
 async function withStub(handler: (req: Request) => Response | Promise<Response>, f: () => Promise<void>) {
@@ -90,41 +89,6 @@ async function withStub(handler: (req: Request) => Response | Promise<Response>,
   try { await f(); } finally { srv.stop(true); unsetEnv(); }
 }
 
-test("liveScope: daemon scope wins and check honors the widened path", async () => {
-  await withStub((req) => {
-    const u = new URL(req.url);
-    if (u.pathname !== "/api/runs/run-1/scope" || req.headers.get("x-factory-token") !== "tok") return new Response("no", { status: 401 });
-    return Response.json({ scope: ["src/auth/**", "tests/**"] });
-  }, async () => {
-    expect(check("Write", { file_path: join(wt, "tests/new.ts") }, liveCtx).allow).toBe(false);
-    expect(await liveScope(liveCtx)).toEqual(["src/auth/**", "tests/**"]);
-    expect(check("Write", { file_path: join(wt, "tests/new.ts") }, { ...liveCtx, scope: await liveScope(liveCtx) }).allow).toBe(true);
-  });
-});
-
-test("liveScope: unreachable daemon falls back to env scope", async () => {
-  useEnv("http://127.0.0.1:1");
-  try { expect(await liveScope(liveCtx)).toEqual(["src/auth/**"]); } finally { unsetEnv(); }
-});
-
-test("liveScope: 401 falls back to env scope", async () => {
-  await withStub(() => new Response("no", { status: 401 }), async () => {
-    expect(await liveScope(liveCtx)).toEqual(["src/auth/**"]);
-  });
-});
-
-test("liveScope: invalid JSON falls back to env scope", async () => {
-  await withStub(() => new Response("<html>not json</html>"), async () => {
-    expect(await liveScope(liveCtx)).toEqual(["src/auth/**"]);
-  });
-});
-
-test("liveScope: busy daemon inside the 3s window still answers", async () => {
-  await withStub(async () => { await Bun.sleep(900); return Response.json({ scope: ["src/auth/**", "busy/**"] }); }, async () => {
-    expect(await liveScope(liveCtx)).toEqual(["src/auth/**", "busy/**"]);
-  });
-}, 20000);
-
 test("reportBlock: busy daemon inside the 3s window still gets the report", async () => {
   let seen: string | undefined;
   await withStub(async (req) => { await Bun.sleep(1600); seen = req.url; return new Response("ok"); }, async () => {
@@ -132,3 +96,9 @@ test("reportBlock: busy daemon inside the 3s window still gets the report", asyn
     expect(seen?.includes("/api/runs/run-1/guard")).toBe(true);
   });
 }, 20000);
+
+test("harness-internal URIs are not files and never blocked", () => {
+  expect(check("write", { path: "xd://factory_report" }, ctx).allow).toBe(true);
+  expect(check("write", { path: "local://notes.md" }, ctx).allow).toBe(true);
+  expect(check("write", { path: "C:/outside/x.ts" }, ctx).allow).toBe(false); // a Windows drive is still a path
+});

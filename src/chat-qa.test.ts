@@ -80,3 +80,31 @@ test("TodoWrite becomes a checklist; local command output becomes a notice", () 
   expect(r.msgs[0].tool!.todos).toEqual([{ content: "a", status: "completed" }, { content: "b", status: "in_progress" }]);
   expect(r.msgs[1].notice).toMatchObject({ kind: "command", title: "Total cost: $0.10" });
 });
+
+const queued = (uuid: string, prompt: string) => ({ type: "attachment", uuid, attachment: { type: "queued_command", prompt } });
+const qop = (operation: string, content?: string) => ({ type: "queue-operation", operation, content });
+
+test("a task-notification delivered mid-turn (as a queued_command attachment) still finishes the background task", () => {
+  write("s7", [use("b1", "Bash", { command: "bun run daemon", run_in_background: true }), result("b1", "started", { backgroundTaskId: "bx9" }),
+    qop("enqueue", "<task-notification>x</task-notification>"),
+    qop("remove", "<task-notification>x</task-notification>"),
+    queued("n9", "<task-notification>\n<task-id>bx9</task-id>\n<tool-use-id>b1</tool-use-id>\n<status>failed</status>\n<summary>Background command failed with exit code 1</summary>\n</task-notification>")]);
+  const r = readChat("s7");
+  expect(r.activity.background).toBe(0);
+  expect(r.msgs[0].tool!.status).toBe("error");
+  expect(r.msgs[1].notice).toMatchObject({ kind: "task", status: "failed" });
+});
+
+test("messages typed while Claude is busy stay queued until delivered; delivered ones become user messages", () => {
+  write("s8", [qop("enqueue", "first"), qop("enqueue", "second"), qop("enqueue", "<task-notification>n</task-notification>")]);
+  expect(readChat("s8").queued).toEqual(["first", "second"]); // notifications are not user messages
+  write("s8", [qop("enqueue", "first"), qop("enqueue", "second"), qop("remove", "first"), queued("q1", "first"), qop("dequeue")]);
+  const r = readChat("s8");
+  expect(r.queued).toEqual([]);
+  expect(r.msgs.map((m) => [m.role, m.text])).toEqual([["user", "first"]]);
+});
+
+test("a pasted image is counted on the user message", () => {
+  write("s9", [{ type: "user", uuid: "u1", message: { role: "user", content: [{ type: "text", text: "what is this" }, { type: "image", source: { type: "base64", data: "AAAA" } }] } }]);
+  expect(readChat("s9").msgs[0]).toMatchObject({ role: "user", text: "what is this", images: 1 });
+});

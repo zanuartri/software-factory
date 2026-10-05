@@ -3,7 +3,7 @@ description: File a new issue, or triage existing issues (still valid? duplicate
 argument-hint: "[description of a bug/idea to file] (empty = triage open issues)"
 ---
 
-Load the `factory-manager` skill first.
+Load the `manager` skill first.
 
 **If `$ARGUMENTS` is not empty**, file it: write a clear title, then a body with symptoms, repro steps (if a bug),
 expected vs actual, and suspected area with `file:line` if you can find it quickly. Pick a kind: bug/feature/chore.

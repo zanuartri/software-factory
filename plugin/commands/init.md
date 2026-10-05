@@ -3,7 +3,7 @@ description: Register this repo as a factory workspace, make this session its ma
 argument-hint: "[--force]"
 ---
 
-Load the `factory-manager` skill first.
+Load the `manager` skill first.
 
 1. Run `factory init --session ${CLAUDE_SESSION_ID} $ARGUMENTS`. If it says another manager is live, tell the
    human and only continue with `--force` if they agree.

@@ -2,6 +2,7 @@
 // No FACTORY_RUN_ID in env → not a factory worker → allow everything.
 import { isAbsolute, relative, resolve } from "node:path";
 
+/** `scope` is advisory (gate + reviewer look at it); the guard only blocks what is unsafe: secrets, other worktrees, outside the worktree, publishing, the daemon API. */
 export type GuardCtx = { worktree: string; scope: string[]; role: "worker" | "reviewer" };
 export type Verdict = { allow: true } | { allow: false; reason: string };
 
@@ -56,10 +57,11 @@ export function inScope(rel: string, scope: string[]) {
 export function check(tool: string, input: any, ctx: GuardCtx): Verdict {
   const k = kind(tool);
   const deny = (reason: string): Verdict => ({ allow: false, reason: `factory guard: ${reason}. If you truly need this, call factory_ask.` });
+  const virtual = (p: unknown) => typeof p === "string" && /^[a-z][a-z0-9+.-]+:/i.test(p); // a 1-letter prefix is a Windows drive // harness-internal URIs (omp: local://, xd://, skill://) aren't files
 
   if (k === "read" || k === "write") {
     const p = pathOf(input);
-    if (!p) return { allow: true };
+    if (!p || virtual(p)) return { allow: true };
     const abs = isAbsolute(p) ? p : resolve(ctx.worktree, p);
     if (SECRET.test(abs)) return deny(`secret-looking path ${p}`);
     // sibling tickets' worktrees live next to ours (~/.factory/worktrees/<ws>/<ticket>): one writer per worktree, and no peeking
@@ -71,7 +73,6 @@ export function check(tool: string, input: any, ctx: GuardCtx): Verdict {
     if (ctx.role === "reviewer") return deny("reviewers are read-only");
     const rel = relative(ctx.worktree, abs);
     if (rel.startsWith("..") || isAbsolute(rel)) return deny(`${p} is outside your worktree`);
-    if (!inScope(rel, ctx.scope)) return deny(`${rel} is outside scope_paths [${ctx.scope.join(", ")}]`);
     return { allow: true };
   }
   if (k === "shell") {
@@ -97,23 +98,6 @@ export function ctxFromEnv(): GuardCtx | null {
     scope: JSON.parse(process.env.FACTORY_SCOPE ?? "[]"),
     role: (process.env.FACTORY_ROLE as any) ?? "worker",
   };
-}
-
-/** Scope the ticket has right now; any failure (no env, network, non-200, bad JSON) keeps the spawn-time scope. */
-export async function liveScope(ctx: GuardCtx): Promise<string[]> {
-  const url = process.env.FACTORY_URL, run = process.env.FACTORY_RUN_ID, token = process.env.FACTORY_TOKEN;
-  if (!url || !run) return ctx.scope;
-  try {
-    const res = await fetch(`${url}/api/runs/${run}/scope`, { headers: { "x-factory-token": token ?? "" }, signal: AbortSignal.timeout(3000) });
-    if (!res.ok) return ctx.scope;
-    const d = (await res.json()) as { scope?: unknown };
-    return Array.isArray(d.scope) && d.scope.every((s) => typeof s === "string") ? d.scope : ctx.scope;
-  } catch { return ctx.scope; }
-}
-
-/** Only writes read ctx.scope; reads/shell/other keep the spawn-time scope and skip the round trip. */
-export async function scopeFor(tool: string, ctx: GuardCtx): Promise<string[]> {
-  return kind(tool) === "write" ? liveScope(ctx) : ctx.scope;
 }
 
 export async function reportBlock(tool: string, reason: string) {

@@ -3,7 +3,7 @@ description: Put open tickets on workers and drive them until every one is in re
 argument-hint: "[T-1 T-2 ...] [--hours N] [--max N]"
 ---
 
-Load the `factory-manager` skill first.
+Load the `manager` skill first.
 
 1. `factory status`. If nothing is open, say so and stop.
 2. `factory run $ARGUMENTS`. The daemon schedules by priority, respects `depends_on`, never runs overlapping scopes

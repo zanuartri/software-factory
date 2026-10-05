@@ -1,12 +1,12 @@
-import { ArrowUp, Maximize2, Minimize2, PanelLeftClose, Play, Plus, RotateCw, Square } from "lucide-react";
+import { ArrowUp, Maximize2, Minimize2, PanelLeftClose, Paperclip, Play, Plus, RotateCw, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Workspace } from "./api";
 import { AnswerLog, AskCard, type Answer, type Prompt } from "./ask";
-import { AgentCard, NoticeRow, TodoCard, ToolRow, type Activity, type Msg } from "./thread";
+import { AgentCard, NoticeRow, TodoCard, ToolRow, UserBubble, type Activity, type Msg } from "./thread";
 import { Select } from "./select";
 import { Btn, Dot, Md } from "./ui";
 
-type Chat = { session: string | null; pane?: string | null; status: string; model?: string | null; activity?: Activity; prompt?: Prompt | { raw: string } | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[] };
+type Chat = { session: string | null; pane?: string | null; status: string; model?: string | null; activity?: Activity; queued?: string[]; prompt?: Prompt | { raw: string } | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[] };
 type Cmd = { name: string; desc: string };
 
 const STATUS: Record<string, { label: string; color: string }> = {
@@ -50,7 +50,11 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const wide = max ? "mx-auto w-full max-w-3xl" : "";
   const [chat, setChat] = useState<Chat | null>(null);
   const [text, setText] = useState("");
-  const [pending, setPending] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ text: string; imgs: string[] } | null>(null);
+  type Att = { id: string; name: string; blob: string; path?: string };
+  const [files, setFiles] = useState<Att[]>([]);
+  const [drag, setDrag] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [cmds, setCmds] = useState<Cmd[]>([]);
   const [sel, setSel] = useState(0);
@@ -69,7 +73,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   }, [load, ws.manager]);
   useEffect(() => { api<Cmd[]>(`${base}/commands`).then(setCmds).catch(() => {}); }, [base]);
   useEffect(() => { const el = input.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } }, [text]); // autosize
-  useEffect(() => { setPending(null); }, [chat?.messages.length]);
+  useEffect(() => { setPending(null); }, [chat?.messages.length, chat?.queued?.length]);
   useEffect(() => { const el = scroller.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [chat?.messages.length, pending, !!chat?.prompt]);
 
   const act = async (fn: () => Promise<unknown>, ok?: string) => {
@@ -78,11 +82,27 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   };
   const start = (resume: boolean) => act(() => api(`${base}/start`, { body: { resume } }), resume ? "Session resumed in herdr" : "New session started in herdr");
   const answer = (a: Answer) => act(() => api(`${base}/answer`, { body: a }));
-  const send = (raw = text) => {
-    const t = raw.trim();
-    if (!t || busy) return;
-    setText(""); setPending(t); stick.current = true;
-    api(base, { body: { text: t } }).then(load).catch((e) => { setPending(null); setText(t); toast(e.message); });
+  /** Images go to the daemon first; the message then carries an @path mention, which Claude Code turns into an attachment. */
+  const addFiles = (list: File[]) => {
+    for (const f of list.filter((x) => /^image\/(png|jpeg|gif|webp)$/.test(x.type))) {
+      const id = crypto.randomUUID(), blob = URL.createObjectURL(f);
+      setFiles((a) => [...a, { id, name: f.name, blob }]);
+      const rd = new FileReader();
+      rd.onload = () => api<{ path: string }>(`${base}/upload`, { body: { name: f.name, mime: f.type, data: String(rd.result).split(",")[1] } })
+        .then((r) => setFiles((a) => a.map((x) => (x.id === id ? { ...x, path: r.path } : x))))
+        .catch((e) => { toast(e.message); setFiles((a) => a.filter((x) => x.id !== id)); });
+      rd.readAsDataURL(f);
+    }
+  };
+  const uploading = files.some((f) => !f.path);
+  const mention = (p: string) => (p.includes(" ") ? `@"${p}"` : `@${p}`);
+  /** Enter queues the message (Claude takes it at its next pause, like in the terminal); `interrupt` stops the current turn first and sends now. */
+  const send = (raw = text, interrupt = false) => {
+    const typed = raw.trim(), atts = raw === text ? files : [];
+    if ((!typed && !atts.length) || busy || atts.some((f) => !f.path)) return;
+    const t = [typed || "Please look at the attached image" + (atts.length > 1 ? "s." : "."), ...atts.map((f) => mention(f.path!))].join("\n");
+    setText(""); setFiles([]); setPending({ text: typed, imgs: atts.map((f) => f.blob) }); stick.current = true;
+    api(base, { body: { text: t, interrupt } }).then(load).catch((e) => { setPending(null); setText(typed); setFiles(atts); toast(e.message); });
   };
   // "/" + word (no space yet) opens the command menu
   const q = /^\/\S*$/.test(text) && !menuOff ? text.slice(1).toLowerCase() : null;
@@ -127,7 +147,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
             </div>
           </div>
         )}
-        {msgs.map((m) => m.qa ? <AnswerLog key={m.id} qa={m.qa} skipped={m.skipped} />
+        {msgs.map((m) => m.role === "user" && !m.qa ? <UserBubble key={m.id} text={m.text} images={m.images} /> : m.qa ? <AnswerLog key={m.id} qa={m.qa} skipped={m.skipped} />
           : m.notice ? <NoticeRow key={m.id} n={m.notice} />
           : m.tool?.agent ? <AgentCard key={m.id} t={m.tool} />
           : m.tool?.todos ? <TodoCard key={m.id} t={m.tool} latest={m.id === lastTodo} />
@@ -135,7 +155,8 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
           : m.role === "user"
             ? <div key={m.id} className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble px-3.5 py-2 text-[13px] text-on-bubble">{m.text}</div>
             : <Md key={m.id} text={m.text} className="break-words" />)}
-        {pending && <div className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble px-3.5 py-2 text-[13px] text-on-bubble opacity-60">{pending}</div>}
+        {(chat?.queued ?? []).map((q, i) => <UserBubble key={`q${i}`} text={q} queued />)}
+        {pending && <UserBubble text={pending.text} local={pending.imgs} queued={st === "working"} />}
         {chat?.prompt && <AskCard prompt={chat.prompt} send={answer} busy={busy} />}
         {live && !chat?.prompt && (st === "working" || (activity?.background ?? 0) > 0) && (
           <div className="flex items-center gap-1.5 truncate text-[12px] text-fg-subtle">
@@ -150,7 +171,19 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
       <div className="shrink-0 px-3 pt-1 pb-3">
         <div className={wide}>
           <form onSubmit={(e) => { e.preventDefault(); send(); }}
-            className="relative rounded-2xl border border-border bg-surface shadow-[var(--shadow)] transition focus-within:border-border-strong focus-within:ring-4 focus-within:ring-[color-mix(in_srgb,var(--accent)_15%,transparent)]">
+            onDragOver={(e) => { if (live && e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDrag(true); } }} onDragLeave={() => setDrag(false)}
+            onDrop={(e) => { setDrag(false); if (e.dataTransfer.files.length) { e.preventDefault(); addFiles([...e.dataTransfer.files]); } }}
+            className={`relative rounded-2xl border bg-surface shadow-[var(--shadow)] transition focus-within:border-border-strong focus-within:ring-4 focus-within:ring-[color-mix(in_srgb,var(--accent)_15%,transparent)] ${drag ? "border-accent" : "border-border"}`}>
+            {files.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-3 pt-3">
+                {files.map((f) => (
+                  <div key={f.id} className="relative">
+                    <img src={f.blob} alt={f.name} className={`size-14 rounded-lg border border-border object-cover ${f.path ? "" : "opacity-50"}`} />
+                    <button type="button" aria-label={`remove ${f.name}`} onClick={() => setFiles((a) => a.filter((x) => x.id !== f.id))} className="absolute -top-1.5 -right-1.5 grid size-5 place-items-center rounded-full border border-border bg-surface text-fg-muted hover:text-fg"><X className="size-3" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
             {matches.length > 0 && (
               <div role="listbox" aria-label="commands" className="absolute right-0 bottom-full left-0 z-10 mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-[var(--shadow-lg)]">
                 {matches.map((c, i) => (
@@ -164,6 +197,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
             )}
             <textarea ref={input} value={text} onChange={(e) => { setText(e.target.value); setSel(0); setMenuOff(false); }} rows={1} disabled={!live || !!chat?.prompt} aria-label="message"
               placeholder={chat?.prompt ? "Answer the question above…" : live ? "Message the manager…  ( / for commands )" : "Start or resume a session to chat"}
+              onPaste={(e) => { const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/")); if (imgs.length) { e.preventDefault(); addFiles(imgs); } }}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return;
                 if (matches.length) {
@@ -171,16 +205,19 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
                   if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && text.slice(1) !== matches[sel].name)) { e.preventDefault(); pick(matches[sel]); return; }
                   if (e.key === "Escape") { e.preventDefault(); setMenuOff(true); return; }
                 }
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(text, (e.ctrlKey || e.metaKey) && st === "working"); }
               }}
               className="no-ring block max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[13.5px] leading-relaxed text-fg outline-none placeholder:text-fg-subtle disabled:opacity-50" />
             <div className="flex items-center gap-1 px-2 pb-2">
               <Select variant="bare" className="h-7 max-w-[200px] px-2! py-0! text-[12px] text-fg-muted" ariaLabel="model" value={chat?.model ?? ""} disabled={!live || st === "working"}
                 options={models.map((m) => ({ value: m, label: m }))} onChange={(m) => send(`/model ${m}`)} placeholder="Model" />
+              <button type="button" title="Attach image (or paste / drop one)" aria-label="Attach image" disabled={!live || !!chat?.prompt} onClick={() => picker.current?.click()}
+                className="grid size-7 place-items-center rounded-lg text-fg-muted transition-colors hover:bg-hover hover:text-fg disabled:opacity-40"><Paperclip className="size-4" /></button>
+              <input ref={picker} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = ""; }} />
               <span className="ml-auto" />
               {live && st === "working"
-                ? <button type="button" title="Interrupt (Esc)" aria-label="Interrupt" onClick={() => act(() => api(`${base}/interrupt`, { method: "POST" }))} className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg transition-opacity hover:opacity-90"><Square className="size-3 fill-current" /></button>
-                : <button type="submit" title="Send" aria-label="Send" disabled={!live || !text.trim()} className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg transition-opacity hover:opacity-90 disabled:opacity-25"><ArrowUp className="size-4" strokeWidth={2.25} /></button>}
+                && <button type="button" title="Interrupt (Esc)" aria-label="Interrupt" onClick={() => act(() => api(`${base}/interrupt`, { method: "POST" }))} className="grid size-7 place-items-center rounded-full border border-border text-fg-muted transition-colors hover:bg-hover hover:text-fg"><Square className="size-3 fill-current" /></button>}
+              <button type="submit" title={live && st === "working" ? "Queue message (Enter) · Ctrl+Enter interrupts and sends" : "Send"} aria-label="Send" disabled={!live || (!text.trim() && !files.length) || uploading} className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg transition-opacity hover:opacity-90 disabled:opacity-25"><ArrowUp className="size-4" strokeWidth={2.25} /></button>
             </div>
           </form>
           {(chat?.usage?.ctx || chat?.usage?.h5 || chat?.usage?.d7) && (

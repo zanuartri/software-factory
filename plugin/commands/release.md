@@ -3,7 +3,7 @@ description: Check draft tickets, tighten their briefs, and move them to open
 argument-hint: "[T-1 T-2 ...] (default: all drafts)"
 ---
 
-Load the `factory-manager` skill first.
+Load the `manager` skill first.
 
 For each draft ticket (the ones in `$ARGUMENTS`, or all drafts from `factory ticket list --status draft`):
 

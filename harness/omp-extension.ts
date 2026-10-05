@@ -1,6 +1,6 @@
 // omp bridge: factory tools (same definitions as the MCP server) + guard. Loaded with `omp -e`; no-op outside factory runs.
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { check, ctxFromEnv, reportBlock, scopeFor } from "../src/guard";
+import { check, ctxFromEnv, reportBlock } from "../src/guard";
 import { TOOLS } from "../src/mcp";
 
 export default function (omp: ExtensionAPI) {
@@ -29,7 +29,7 @@ export default function (omp: ExtensionAPI) {
   }
 
   omp.on("tool_call", async (event: any) => {
-    const v = check(event.toolName, event.input, { ...ctx, scope: await scopeFor(event.toolName, ctx) });
+    const v = check(event.toolName, event.input, ctx);
     if (v.allow) return undefined;
     await reportBlock(event.toolName, v.reason);
     return { block: true, reason: v.reason };

@@ -12,11 +12,12 @@ export type ToolInfo = {
   result?: string; task?: string; agent?: AgentInfo; todos?: Todo[]; events?: string[]; // Monitor: lines it reported
 };
 export type Notice = { kind: "task" | "command" | "message"; status?: string; title: string; body?: string };
-export type ChatMsg = { id: string; role: "user" | "assistant" | "tool" | "notice"; text: string; qa?: QA[]; skipped?: boolean; tool?: ToolInfo; notice?: Notice };
+export type ChatMsg = { id: string; role: "user" | "assistant" | "tool" | "notice"; text: string; images?: number; qa?: QA[]; skipped?: boolean; tool?: ToolInfo; notice?: Notice };
 export type Activity = { running: { name: string; detail: string } | null; background: number };
 
 const PROJECTS = join(homedir(), ".claude", "projects");
-const cache = new Map<string, { sig: string; msgs: ChatMsg[]; model: string | null; activity: Activity }>();
+type Read = { msgs: ChatMsg[]; model: string | null; activity: Activity; queued: string[] };
+const cache = new Map<string, { sig: string } & Read>();
 
 export const transcriptPath = (session: string) => {
   if (!existsSync(PROJECTS)) return null;
@@ -51,23 +52,60 @@ function agentProgress(dir: string, a: AgentInfo) {
   a.steps = steps; a.last = last;
 }
 
-export function readChat(session: string, limit = 300): { msgs: ChatMsg[]; model: string | null; activity: Activity } {
+export function readChat(session: string, limit = 300): Read {
   const f = transcriptPath(session);
-  if (!f) return { msgs: [], model: null, activity: { running: null, background: 0 } };
+  if (!f) return { msgs: [], model: null, activity: { running: null, background: 0 }, queued: [] };
   const subDir = join(dirname(f), session, "subagents");
   const st = statSync(f);
   const sig = [`${st.mtimeMs}:${st.size}`, ...jsonls(subDir).map((s) => { const x = statSync(s); return `${x.mtimeMs}:${x.size}`; })].join("|");
   const hit = cache.get(f);
-  if (hit?.sig === sig) return { msgs: hit.msgs.slice(-limit), model: hit.model, activity: hit.activity };
+  if (hit?.sig === sig) return { ...hit, msgs: hit.msgs.slice(-limit) };
 
   const msgs: ChatMsg[] = [];
   let model: string | null = null;
   const byId = new Map<string, ChatMsg>(); // tool_use id → its message, so results and notifications can find it
   const findTool = (id: string, task?: string) => [...byId.values()].find((m) => m.tool && (m.tool.id === id || (task && m.tool.task === task)))?.tool;
 
+  // Text that reached the model: a user message, or an attachment delivered mid-turn (task notifications, queued messages).
+  const note = (raw: string, uuid: string, isMeta?: boolean) => {
+    if (!raw) return;
+    if (raw.startsWith("<task-notification>")) { // a background command / subagent finished, or a Monitor line
+      const status = tag(raw, "status") || "completed", summary = tag(raw, "summary"), event = tag(raw, "event");
+      const t = findTool(tag(raw, "tool-use-id"), tag(raw, "task-id"));
+      if (event) { // a Monitor line belongs to the still-running watcher, not to a finished task
+        if (t) t.events = [...(t.events ?? []), clip(event, 300)].slice(-30);
+        else msgs.push({ id: uuid, role: "notice", text: event, notice: { kind: "message", title: `${summary || "Monitor"} · ${clip(event, 160)}` } });
+        return;
+      }
+      if (t) { t.status = status === "completed" ? "done" : "error"; if (t.agent) t.agent.done = status === "completed"; }
+      msgs.push({ id: uuid, role: "notice", text: summary, notice: { kind: "task", status, title: summary || `Task ${status}` } });
+    } else if (/^<(agent|teammate)-message/.test(raw)) { // a subagent's hand-back report
+      const from = raw.match(/from="([^"]+)"/)?.[1] ?? "", body = raw.replace(/^<[^>]+>\s*/, "").replace(/<\/[^>]+>\s*$/, "").replace(/^\[Subagent hand-back\][^\n]*\n?/, "").trim();
+      const t = [...byId.values()].find((m) => m.tool?.agent?.id === from)?.tool;
+      if (t?.agent) { t.agent.report = body; t.agent.done = true; }
+      else msgs.push({ id: uuid, role: "notice", text: from, notice: { kind: "message", title: `Message from ${from || "an agent"}`, body: clip(body, 2000) } });
+    } else if (raw.includes("<local-command-stdout>")) { // output of a local slash command (/cost, /context, /model…)
+      const out = tag(raw, "local-command-stdout").replace(ANSI, "").trim();
+      if (out) msgs.push({ id: uuid, role: "notice", text: out, notice: { kind: "command", title: clip(out.split("\n")[0], 120), body: out.includes("\n") ? clip(out, 3000) : undefined } });
+    } else if (raw.startsWith("<command-name>")) {
+      msgs.push({ id: uuid, role: "user", text: `${tag(raw, "command-name")} ${tag(raw, "command-args")}`.trim() });
+    } else if (/^\[Request interrupted/.test(raw)) {
+      msgs.push({ id: uuid, role: "notice", text: raw, notice: { kind: "command", title: raw.includes("tool use") ? "Interrupted during a tool call" : "Interrupted" } });
+    } else if (!raw.startsWith("<") && !isMeta) msgs.push({ id: uuid, role: "user", text: raw }); // "<…>" = injected reminders
+  };
+
+  const queue: string[] = []; // messages typed while Claude was busy, until they are delivered
   for (const line of readFileSync(f, "utf8").split("\n")) {
     if (!line) continue;
     let e: any; try { e = JSON.parse(line); } catch { continue; }
+    if (e.type === "queue-operation") {
+      const c = String(e.content ?? "");
+      if (e.operation === "enqueue") queue.push(c);
+      else if (e.operation === "dequeue") queue.shift();
+      else if (e.operation === "remove") { const i = queue.indexOf(c); if (i >= 0) queue.splice(i, 1); }
+      continue;
+    }
+    if (e.type === "attachment" && e.attachment?.type === "queued_command") { note(String(e.attachment.prompt ?? "").trim(), e.uuid ?? `q-${msgs.length}`); continue; }
     if (e.isSidechain || !e.message) continue;
 
     if (e.type === "user") {
@@ -92,28 +130,9 @@ export function readChat(session: string, limit = 300): { msgs: ChatMsg[]; model
         }
       }
       const raw = textOf(content).trim();
-      if (!raw) continue;
-      if (raw.startsWith("<task-notification>")) { // a background command / subagent finished
-        const status = tag(raw, "status") || "completed", summary = tag(raw, "summary"), event = tag(raw, "event");
-        const t = findTool(tag(raw, "tool-use-id"), tag(raw, "task-id"));
-        if (event) { // a Monitor line: it belongs to the still-running watcher, not to a finished task
-          if (t) t.events = [...(t.events ?? []), clip(event, 300)].slice(-30);
-          else msgs.push({ id: e.uuid, role: "notice", text: event, notice: { kind: "message", title: `${summary || "Monitor"} · ${clip(event, 160)}` } });
-          continue;
-        }
-        if (t) { t.status = status === "completed" ? "done" : "error"; if (t.agent) t.agent.done = status === "completed"; }
-        msgs.push({ id: e.uuid, role: "notice", text: summary, notice: { kind: "task", status, title: summary || `Task ${status}` } });
-      } else if (/^<(agent|teammate)-message/.test(raw)) { // a subagent's hand-back report
-        const from = raw.match(/from="([^"]+)"/)?.[1] ?? "", body = raw.replace(/^<[^>]+>\s*/, "").replace(/<\/[^>]+>\s*$/, "").replace(/^\[Subagent hand-back\][^\n]*\n?/, "").trim();
-        const t = [...byId.values()].find((m) => m.tool?.agent?.id === from)?.tool;
-        if (t?.agent) { t.agent.report = body; t.agent.done = true; }
-        else msgs.push({ id: e.uuid, role: "notice", text: from, notice: { kind: "message", title: `Message from ${from || "an agent"}`, body: clip(body, 2000) } });
-      } else if (raw.includes("<local-command-stdout>")) { // output of a local slash command (/cost, /context, /model…)
-        const out = tag(raw, "local-command-stdout").replace(ANSI, "").trim();
-        if (out) msgs.push({ id: e.uuid, role: "notice", text: out, notice: { kind: "command", title: clip(out.split("\n")[0], 120), body: out.includes("\n") ? clip(out, 3000) : undefined } });
-      } else if (raw.startsWith("<command-name>")) {
-        msgs.push({ id: e.uuid, role: "user", text: `${tag(raw, "command-name")} ${tag(raw, "command-args")}`.trim() });
-      } else if (!raw.startsWith("<") && !e.isMeta) msgs.push({ id: e.uuid, role: "user", text: raw }); // "<…>" = injected reminders
+      const images = Array.isArray(content) ? content.filter((b: any) => b.type === "image").length : 0;
+      if (raw) note(raw, e.uuid, e.isMeta);
+      if (images) { const m = msgs.at(-1); if (raw && m && m.id === e.uuid) m.images = images; else msgs.push({ id: `${e.uuid}:img`, role: "user", text: "", images }); }
     } else if (e.type === "assistant" && Array.isArray(e.message.content)) {
       if (e.message.model && e.message.model !== "<synthetic>") model = e.message.model;
       e.message.content.forEach((b: any, i: number) => {
@@ -138,6 +157,7 @@ export function readChat(session: string, limit = 300): { msgs: ChatMsg[]; model
   for (const m of msgs) if (m.tool?.status === "background") background++;
   for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].tool?.status === "running") { running = { name: msgs[i].tool!.name, detail: msgs[i].tool!.detail }; break; }
   const activity = { running, background };
-  cache.set(f, { sig, msgs, model, activity }); // ponytail: re-parses the whole file on change; tail-read incrementally if transcripts get huge
-  return { msgs: msgs.slice(-limit), model, activity };
+  const queued = queue.filter((q) => q.trim() && !q.startsWith("<"));
+  cache.set(f, { sig, msgs, model, activity, queued }); // ponytail: re-parses the whole file on change; tail-read incrementally if transcripts get huge
+  return { msgs: msgs.slice(-limit), model, activity, queued };
 }

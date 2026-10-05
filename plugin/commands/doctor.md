@@ -2,7 +2,7 @@
 description: Health check of the factory — daemon, harness CLIs, guards, workspace config, orphaned runs and worktrees
 ---
 
-Load the `factory-manager` skill first.
+Load the `manager` skill first.
 
 1. Run `factory doctor` and `factory status`.
 2. For each ✖ line, fix what is safe to fix, and explain the rest:

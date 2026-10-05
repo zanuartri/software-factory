@@ -3,7 +3,7 @@ description: Brainstorm and grill an idea until it's sharp, then turn it into dr
 argument-hint: "<idea, feature or problem> [--issue I-3]"
 ---
 
-Load the `factory-manager` skill first.
+Load the `manager` skill first.
 
 1. Ground yourself: `factory status`, `.factory/rules.md`, and any issue named in `$ARGUMENTS` (`factory issue list`).
    Read the code the idea touches, using Explore subagents for anything broad. Facts are your job. Don't ask the

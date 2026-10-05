@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { db, emit, getRun, HOME, onEvent, PORT, type Run } from "./db";
 import * as git from "./git";
 import * as herdr from "./herdr";
@@ -65,17 +65,40 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       const agent = await managerAgent(sup.mustWs(params.ws));
       const w = sup.mustWs(params.ws); // re-read: a /clear re-links the workspace to the pane's new session
       if (!w.manager) return json({ session: null, status: "none", messages: [] });
-      const { msgs, model, activity } = herdr.readChat(w.manager);
+      const { msgs, model, activity, queued } = herdr.readChat(w.manager);
       const screen = agent ? await herdr.readScreen(agent.pane_id) : "";
       const usage = agent ? herdr.usageFrom(screen) : null;
       const prompt = agent ? await herdr.promptFrom(agent.pane_id, screen, agent.agent_status === "blocked") : null;
-      return json({ session: w.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, prompt, activity, messages: msgs });
+      return json({ session: w.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, prompt, activity, queued, messages: msgs });
     },
     POST: async (req) => {
       const w = sup.mustWs(req.params.ws), agent = await managerAgent(w);
       if (!agent) throw new Error("manager session is not running in herdr — start or resume one");
-      await herdr.prompt(agent.pane_id, (await body(req)).text);
+      const b = await body(req);
+      if (b.interrupt && agent.agent_status === "working") { await herdr.interrupt(agent.pane_id); await Bun.sleep(450); } // steer now: stop the current turn, then send
+      await herdr.prompt(agent.pane_id, b.text);
       return json({ ok: true });
+    },
+  },
+  /** Images for the chat: saved under FACTORY_HOME/uploads/<ws>; the message then carries an `@path` mention, which Claude Code turns into an image attachment. */
+  "/api/ws/:ws/chat/upload": {
+    POST: async (req) => {
+      const w = sup.mustWs(req.params.ws), b = await body(req);
+      const ext = ({ "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" } as Record<string, string>)[String(b.mime)];
+      if (!ext) throw new Error("only png, jpeg, gif or webp images");
+      const bytes = Buffer.from(String(b.data ?? ""), "base64");
+      if (!bytes.length || bytes.length > 15e6) throw new Error("image must be between 1 byte and 15 MB");
+      const dir = join(HOME, "uploads", w.id);
+      mkdirSync(dir, { recursive: true });
+      const file = `${Date.now().toString(36)}-${basename(String(b.name ?? "image")).replace(/[^\w.-]+/g, "_").replace(/\.[a-z0-9]+$/i, "").slice(0, 40) || "image"}.${ext}`;
+      writeFileSync(join(dir, file), bytes);
+      return json({ path: join(dir, file).replace(/\\/g, "/"), url: `/api/uploads/${w.id}/${file}` });
+    },
+  },
+  "/api/uploads/:ws/:file": {
+    GET: ({ params }) => {
+      const p = join(HOME, "uploads", basename(params.ws), basename(params.file));
+      return existsSync(p) ? new Response(Bun.file(p), { headers: { "cache-control": "private, max-age=86400" } }) : json({ error: "not found" }, 404);
     },
   },
   "/api/ws/:ws/chat/commands": { GET: ({ params }) => json(herdr.slashCommands(wsPath(params.ws))) },
@@ -191,13 +214,6 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       if (!r || req.headers.get("x-factory-token") !== r.token) return json({ error: "unauthorized" }, 401);
       emit(r.ws, "guard.blocked", await body(req), { ticket: r.ticket, run: r.id });
       return json({ ok: true });
-    },
-  },
-  "/api/runs/:id/scope": {
-    GET: (req) => {
-      const r = getRun(req.params.id);
-      if (!r || req.headers.get("x-factory-token") !== r.token) return json({ error: "unauthorized" }, 401);
-      return json({ scope: store.getTicket(sup.mustWs(r.ws).path, r.ticket)?.scope_paths ?? [] });
     },
   },
 

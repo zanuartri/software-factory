@@ -245,7 +245,7 @@ export const timeboxMs = (t: Ticket) => {
 
 export const verifyCommands = (t: Ticket) =>
   (t.sections.Verify ?? "").split(/\r?\n/).map((l) => l.replace(/^```\w*|```$/g, "").replace(/^\s*[-*$]\s*/, "").trim())
-    .filter((l) => l && !l.startsWith("#"));
+    .filter((l) => l && !l.startsWith("#") && !/^(none|n\/a|no code|manual|-)\b/i.test(l)); // prose like "none" or "manual check" is not a command
 
 // ---- issues
 export function readIssue(file: string): Issue {
