@@ -65,11 +65,11 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       const agent = await managerAgent(sup.mustWs(params.ws));
       const w = sup.mustWs(params.ws); // re-read: a /clear re-links the workspace to the pane's new session
       if (!w.manager) return json({ session: null, status: "none", messages: [] });
-      const { msgs, model } = herdr.readChat(w.manager);
+      const { msgs, model, activity } = herdr.readChat(w.manager);
       const screen = agent ? await herdr.readScreen(agent.pane_id) : "";
       const usage = agent ? herdr.usageFrom(screen) : null;
       const prompt = agent ? await herdr.promptFrom(agent.pane_id, screen, agent.agent_status === "blocked") : null;
-      return json({ session: w.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, prompt, messages: msgs });
+      return json({ session: w.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, prompt, activity, messages: msgs });
     },
     POST: async (req) => {
       const w = sup.mustWs(req.params.ws), agent = await managerAgent(w);

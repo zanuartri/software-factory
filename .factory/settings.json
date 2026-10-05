@@ -25,7 +25,7 @@
       ]
     },
     "commandcode": {
-      "enabled": true,
+      "enabled": false,
       "model": "deepseek/deepseek-v4.1-flash",
       "models": [
         "deepseek/deepseek-v4.1-flash",

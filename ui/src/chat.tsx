@@ -1,12 +1,12 @@
-import { ArrowUp, Maximize2, Minimize2, PanelLeftClose, Play, Plus, RotateCw, Square, Wrench } from "lucide-react";
+import { ArrowUp, Maximize2, Minimize2, PanelLeftClose, Play, Plus, RotateCw, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Workspace } from "./api";
-import { AnswerLog, AskCard, type Answer, type Prompt, type QA } from "./ask";
+import { AnswerLog, AskCard, type Answer, type Prompt } from "./ask";
+import { AgentCard, NoticeRow, TodoCard, ToolRow, type Activity, type Msg } from "./thread";
 import { Select } from "./select";
 import { Btn, Dot, Md } from "./ui";
 
-type Msg = { id: string; role: "user" | "assistant" | "tool"; text: string; qa?: QA[]; skipped?: boolean };
-type Chat = { session: string | null; pane?: string | null; status: string; model?: string | null; prompt?: Prompt | { raw: string } | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[] };
+type Chat = { session: string | null; pane?: string | null; status: string; model?: string | null; activity?: Activity; prompt?: Prompt | { raw: string } | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[] };
 type Cmd = { name: string; desc: string };
 
 const STATUS: Record<string, { label: string; color: string }> = {
@@ -94,6 +94,8 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const live = !!chat?.pane;
   const meta = STATUS[st];
   const msgs = chat?.messages ?? [];
+  const lastTodo = [...msgs].reverse().find((m) => m.tool?.todos)?.id;
+  const activity = chat?.activity;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
@@ -125,14 +127,23 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
             </div>
           </div>
         )}
-        {msgs.map((m) => m.qa ? <AnswerLog key={m.id} qa={m.qa} skipped={m.skipped} /> : m.role === "tool"
-          ? <div key={m.id} className="flex items-center gap-1.5 truncate font-mono text-[11px] text-fg-subtle"><Wrench className="size-3 shrink-0" /><span className="truncate">{m.text}</span></div>
+        {msgs.map((m) => m.qa ? <AnswerLog key={m.id} qa={m.qa} skipped={m.skipped} />
+          : m.notice ? <NoticeRow key={m.id} n={m.notice} />
+          : m.tool?.agent ? <AgentCard key={m.id} t={m.tool} />
+          : m.tool?.todos ? <TodoCard key={m.id} t={m.tool} latest={m.id === lastTodo} />
+          : m.tool ? <ToolRow key={m.id} t={m.tool} />
           : m.role === "user"
             ? <div key={m.id} className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble px-3.5 py-2 text-[13px] text-on-bubble">{m.text}</div>
             : <Md key={m.id} text={m.text} className="break-words" />)}
         {pending && <div className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble px-3.5 py-2 text-[13px] text-on-bubble opacity-60">{pending}</div>}
         {chat?.prompt && <AskCard prompt={chat.prompt} send={answer} busy={busy} />}
-        {live && st === "working" && <div className="flex items-center gap-1.5 text-[12px] text-fg-subtle"><Dot on pulse color="var(--warning)" />Thinking…</div>}
+        {live && !chat?.prompt && (st === "working" || (activity?.background ?? 0) > 0) && (
+          <div className="flex items-center gap-1.5 truncate text-[12px] text-fg-subtle">
+            <Dot on pulse color="var(--warning)" />
+            <span className="truncate">{st === "working" ? (activity?.running ? `Running ${activity.running.name}${activity.running.detail ? ` · ${activity.running.detail}` : ""}` : "Thinking…") : "Idle"}</span>
+            {(activity?.background ?? 0) > 0 && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-fg-muted">{activity!.background} in background</span>}
+          </div>
+        )}
         </div>
       </div>
 

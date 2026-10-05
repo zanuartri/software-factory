@@ -39,55 +39,8 @@ export async function startClaude(cwd: string, label: string, name: string, resu
   throw new Error(startErr?.message ?? "claude started but herdr did not report its session id");
 }
 
-// ---- transcript → chat messages (Claude Code writes ~/.claude/projects/<encoded cwd>/<session>.jsonl)
-export type QA = { question: string; header?: string; answer: string | null };
-export type ChatMsg = { id: string; role: "user" | "assistant" | "tool"; text: string; qa?: QA[]; skipped?: boolean };
-const PROJECTS = join(homedir(), ".claude", "projects");
-const cache = new Map<string, { sig: string; msgs: ChatMsg[]; model: string | null }>();
-
-const transcriptPath = (session: string) => {
-  if (!existsSync(PROJECTS)) return null;
-  for (const d of readdirSync(PROJECTS)) { const f = join(PROJECTS, d, `${session}.jsonl`); if (existsSync(f)) return f; }
-  return null;
-};
-const userText = (c: unknown) => (typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("\n") : "");
-const toolDetail = (i: any) => String(i?.command ?? i?.file_path ?? i?.pattern ?? i?.path ?? i?.description ?? i?.url ?? "").split("\n")[0].slice(0, 120);
-
-export function readChat(session: string, limit = 300): { msgs: ChatMsg[]; model: string | null } {
-  const f = transcriptPath(session);
-  if (!f) return { msgs: [], model: null };
-  const st = statSync(f), sig = `${st.mtimeMs}:${st.size}`;
-  const hit = cache.get(f);
-  if (hit?.sig === sig) return { msgs: hit.msgs.slice(-limit), model: hit.model };
-  const msgs: ChatMsg[] = [];
-  let model: string | null = null;
-  const asked = new Map<string, number>(); // AskUserQuestion tool_use id → index in msgs, to attach the answers when they arrive
-  for (const line of readFileSync(f, "utf8").split("\n")) {
-    if (!line) continue;
-    let e: any; try { e = JSON.parse(line); } catch { continue; }
-    if (e.isSidechain || e.isMeta || !e.message) continue;
-    if (e.type === "user") {
-      if (Array.isArray(e.message.content)) for (const b of e.message.content) if (b.type === "tool_result" && asked.has(b.tool_use_id)) {
-        const m = msgs[asked.get(b.tool_use_id)!], answers = e.toolUseResult?.answers as Record<string, string> | undefined;
-        if (answers) m.qa = m.qa!.map((q) => ({ ...q, answer: answers[q.question] ?? null }));
-        else m.skipped = true; // rejected / interrupted: no answers came back
-      }
-      const t = userText(e.message.content).trim();
-      if (t && !t.startsWith("<")) msgs.push({ id: e.uuid, role: "user", text: t }); // "<…>" = injected system-reminder / command wrappers
-    } else if (e.type === "assistant" && Array.isArray(e.message.content)) {
-      if (e.message.model && e.message.model !== "<synthetic>") model = e.message.model;
-      e.message.content.forEach((b: any, i: number) => {
-        if (b.type === "text" && b.text?.trim()) msgs.push({ id: `${e.uuid}:${i}`, role: "assistant", text: b.text });
-        else if (b.type === "tool_use" && b.name === "AskUserQuestion") {
-          asked.set(b.id, msgs.length);
-          msgs.push({ id: `${e.uuid}:${i}`, role: "tool", text: "AskUserQuestion", qa: (b.input?.questions ?? []).map((q: any) => ({ question: q.question, header: q.header, answer: null })) });
-        } else if (b.type === "tool_use") msgs.push({ id: `${e.uuid}:${i}`, role: "tool", text: `${b.name} ${toolDetail(b.input)}`.trim() });
-      });
-    }
-  }
-  cache.set(f, { sig, msgs, model }); // ponytail: re-parses the whole file on change; tail-read incrementally if transcripts get huge
-  return { msgs: msgs.slice(-limit), model };
-}
+// ---- transcript → chat thread lives in ./transcript
+export { readChat, type ChatMsg } from "./transcript";
 
 // ---- slash commands for the chat autocomplete: built-ins + user/project/plugin commands and skills
 export type SlashCmd = { name: string; desc: string };
