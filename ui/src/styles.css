@@ -22,7 +22,7 @@
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-h-claude: var(--h-claude);
-  --color-h-pi: var(--h-pi);
+  --color-h-omp: var(--h-omp);
   --color-h-commandcode: var(--h-commandcode);
 }
 
@@ -46,7 +46,7 @@
   --warning: #c27400;
   --danger: #c21d2e;
   --h-claude: #d97757;
-  --h-pi: #0891b2;
+  --h-omp: #0891b2;
   --h-commandcode: #7c3aed;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 1px rgb(0 0 0 / 0.02);
   --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.18), 0 2px 6px rgb(0 0 0 / 0.04);
@@ -73,7 +73,7 @@
     --warning: #ffb45e;
     --danger: #ff8a94;
     --h-claude: #e8977a;
-    --h-pi: #22d3ee;
+    --h-omp: #22d3ee;
     --h-commandcode: #a78bfa;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
     --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.04);
@@ -99,7 +99,7 @@
   --warning: #ffb45e;
   --danger: #ff8a94;
   --h-claude: #e8977a;
-  --h-pi: #22d3ee;
+  --h-omp: #22d3ee;
   --h-commandcode: #a78bfa;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.04);

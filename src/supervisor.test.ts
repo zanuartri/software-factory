@@ -49,10 +49,10 @@ test("scope overlap decides what may run in parallel", () => {
 });
 
 test("reviewer comes from a different harness when one is enabled", () => {
-  const s = structuredClone(DEFAULT_SETTINGS); // claude + pi enabled
-  expect(pickReviewer(s, { harness: "claude", model: "sonnet" }).harness).toBe("pi");
-  expect(pickReviewer(s, { harness: "pi", model: "" }).harness).toBe("claude");
-  s.harnesses.pi.enabled = false;
+  const s = structuredClone(DEFAULT_SETTINGS); // claude + omp enabled
+  expect(pickReviewer(s, { harness: "claude", model: "sonnet" }).harness).toBe("omp");
+  expect(pickReviewer(s, { harness: "omp", model: "" }).harness).toBe("claude");
+  s.harnesses.omp.enabled = false;
   expect(pickReviewer(s, { harness: "claude", model: "sonnet" })).toEqual({ harness: "claude", model: "opus" }); // same harness, different model
 });
 
@@ -65,8 +65,8 @@ test("bashPath is Git Bash on Windows, never the System32 WSL launcher", () => {
 const CATALOG = {
   "commandcode:cheapo": { cost: 0.5, quality: 2, family: "cheapo" },
   "commandcode:deepseek": { cost: 1, quality: 3, family: "deepseek" },
-  "pi:mimo": { cost: 2, quality: 3, family: "mimo" },
-  "pi:hy3": { cost: 2, quality: 4, family: "hy3", caps: ["ui"] },
+  "omp:mimo": { cost: 2, quality: 3, family: "mimo" },
+  "omp:hy3": { cost: 2, quality: 4, family: "hy3", caps: ["ui"] },
   "claude:sonnet": { cost: 5, quality: 4, family: "claude" },
   "claude:opus": { cost: 8, quality: 5, family: "claude" },
 };
@@ -84,7 +84,7 @@ test("pickWorker: the cheapest qualifying pair wins", () => {
 
 test("pickWorker: a high-difficulty ticket skips a cheap quality-3 model", () => {
   const s = settingsWithCatalog();
-  expect(pickWorker(s, mkTicket({ difficulty: "high" }), [])).toEqual({ harness: "pi", model: "hy3" });
+  expect(pickWorker(s, mkTicket({ difficulty: "high" }), [])).toEqual({ harness: "omp", model: "hy3" });
 });
 
 test("pickWorker: attempt 2 escalates the minimum quality", () => {
@@ -96,7 +96,7 @@ test("pickWorker: attempt 2 escalates the minimum quality", () => {
 
 test("pickWorker: a ui tag requires the ui cap", () => {
   const s = settingsWithCatalog();
-  expect(pickWorker(s, mkTicket({ tags: ["ui"] }), [])).toEqual({ harness: "pi", model: "hy3" });
+  expect(pickWorker(s, mkTicket({ tags: ["ui"] }), [])).toEqual({ harness: "omp", model: "hy3" });
 });
 
 test("pickWorker: a high-difficulty retry (minQuality 5) takes the best free pair, not the default harness", () => {
@@ -104,17 +104,17 @@ test("pickWorker: a high-difficulty retry (minQuality 5) takes the best free pai
   s.harnesses.commandcode.enabled = true;
   s.catalog = {
     "commandcode:retry-cheap": { cost: 1, quality: 3, family: "a" },
-    "pi:retry-best": { cost: 9, quality: 4, family: "b" },
+    "omp:retry-best": { cost: 9, quality: 4, family: "b" },
   };
-  expect(pickWorker(s, mkTicket({ difficulty: "high" }), [], 2)).toEqual({ harness: "pi", model: "retry-best" });
+  expect(pickWorker(s, mkTicket({ difficulty: "high" }), [], 2)).toEqual({ harness: "omp", model: "retry-best" });
 });
 
 test("pickWorker: the quality fallback never picks a max:0 (reviewer-only) harness", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
   s.harnesses.commandcode.enabled = true;
-  (s.harnesses.pi as any).max = 0; // highest quality, but not free
+  (s.harnesses.omp as any).max = 0; // highest quality, but not free
   s.catalog = {
-    "pi:max0-best": { cost: 1, quality: 5, family: "a" },
+    "omp:max0-best": { cost: 1, quality: 5, family: "a" },
     "commandcode:fallback-ok": { cost: 1, quality: 2, family: "b" },
   };
   expect(pickWorker(s, mkTicket({ difficulty: "high" }), [], 2)).toEqual({ harness: "commandcode", model: "fallback-ok" });
@@ -122,7 +122,7 @@ test("pickWorker: the quality fallback never picks a max:0 (reviewer-only) harne
 
 test("pickWorker: a ui tag falls back to the default harness when no free pair has the ui cap", () => {
   const s = settingsWithCatalog();
-  (s.harnesses.pi as any).max = 0; // the only ui-capable pair sits on a reviewer-only harness
+  (s.harnesses.omp as any).max = 0; // the only ui-capable pair sits on a reviewer-only harness
   expect(pickWorker(s, mkTicket({ tags: ["ui"] }), [])).toEqual({ harness: "claude", model: "sonnet" });
 });
 
@@ -134,11 +134,11 @@ test("pickWorker: an explicit ticket harness/model wins", () => {
 test("pickWorker: two equal-cost pairs alternate across calls", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
   s.harnesses.commandcode.enabled = true;
-  s.catalog = { "pi:tieA": { cost: 3, quality: 3, family: "a" }, "commandcode:tieB": { cost: 3, quality: 3, family: "b" } };
+  s.catalog = { "omp:tieA": { cost: 3, quality: 3, family: "a" }, "commandcode:tieB": { cost: 3, quality: 3, family: "b" } };
   const t = mkTicket();
-  expect(pickWorker(s, t, [])?.harness).toBe("pi");
+  expect(pickWorker(s, t, [])?.harness).toBe("omp");
   expect(pickWorker(s, t, [])?.harness).toBe("commandcode");
-  expect(pickWorker(s, t, [])?.harness).toBe("pi");
+  expect(pickWorker(s, t, [])?.harness).toBe("omp");
 });
 
 test("pickWorker: an empty catalog gives today's result", () => {
@@ -178,9 +178,9 @@ test("effectiveQuality: never drops below 1", () => {
 });
 
 test("effectiveQuality: caches the pair's record instead of re-querying", () => {
-  expect(effectiveQuality("pi:cached", 3)).toBe(3);
-  gateOutcomes("pi", "cached", 0, 6); // would demote, but the pass already read this pair
-  expect(effectiveQuality("pi:cached", 3)).toBe(3);
+  expect(effectiveQuality("omp:cached", 3)).toBe(3);
+  gateOutcomes("omp", "cached", 0, 6); // would demote, but the pass already read this pair
+  expect(effectiveQuality("omp:cached", 3)).toBe(3);
 });
 
 test("effectiveQuality: hitting the timebox counts as a failure", () => {
@@ -212,10 +212,10 @@ test("pickWorker: a demoted pair loses to the next-cheapest qualifying pair", ()
   s.harnesses.commandcode.enabled = true;
   s.catalog = {
     "commandcode:demoted": { cost: 1, quality: 3, family: "a" },
-    "pi:ok": { cost: 2, quality: 3, family: "b" },
+    "omp:ok": { cost: 2, quality: 3, family: "b" },
   };
   gateOutcomes("commandcode", "demoted", 2, 4); // 2/6 → effective 2 < medium's 3
-  expect(pickWorker(s, mkTicket(), [])).toEqual({ harness: "pi", model: "ok" });
+  expect(pickWorker(s, mkTicket(), [])).toEqual({ harness: "omp", model: "ok" });
 });
 
 test("pickWorker: an unknown difficulty falls back to medium's minimum", () => {
@@ -229,7 +229,7 @@ test("pickReviewer: never comes from the worker's harness when the worker isn't 
     "claude:sonnet": { cost: 5, quality: 4, family: "claude" },
     "claude:opus": { cost: 8, quality: 5, family: "claude" },
   };
-  expect(pickReviewer(s, { harness: "claude", model: "not-in-catalog" })).toEqual({ harness: "pi", model: "" });
+  expect(pickReviewer(s, { harness: "claude", model: "not-in-catalog" })).toEqual({ harness: "omp", model: DEFAULT_SETTINGS.harnesses.omp.model });
 });
 
 test("reviewerCheck: a same-harness reviewer from a different family passes", () => {
@@ -246,7 +246,7 @@ test("reviewerCheck: a same-harness reviewer from a different family passes", ()
 
 test("reviewerCheck: a reviewer whose family matches the worker fails, even on another harness", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
-  s.harnesses.pi.enabled = false;
+  s.harnesses.omp.enabled = false;
   s.harnesses.commandcode.enabled = true;
   s.reviewer_models.commandcode = "glm";
   s.catalog = {
@@ -257,9 +257,9 @@ test("reviewerCheck: a reviewer whose family matches the worker fails, even on a
 });
 
 test("reviewerCheck: an empty catalog keeps the harness rule", () => {
-  expect(reviewerCheck(structuredClone(DEFAULT_SETTINGS))).toEqual({ ok: true, detail: "claude → pi" });
+  expect(reviewerCheck(structuredClone(DEFAULT_SETTINGS))).toEqual({ ok: true, detail: `claude → omp/${DEFAULT_SETTINGS.harnesses.omp.model}` });
   const s = structuredClone(DEFAULT_SETTINGS);
-  s.harnesses.pi.enabled = false;
+  s.harnesses.omp.enabled = false;
   expect(reviewerCheck(s)).toEqual({ ok: false, detail: "claude → claude/opus" });
 });
 
@@ -283,9 +283,20 @@ test("doctor: the model catalog line names where the catalog came from", () => {
     return c;
   };
 
-  writeFileSync(globalFile, JSON.stringify({ "pi:hy3": { cost: 2, quality: 5, family: "pi" }, "commandcode:deepseek": { cost: 1, quality: 4, family: "cc" } }));
+  writeFileSync(globalFile, JSON.stringify({ "omp:hy3": { cost: 2, quality: 5, family: "omp" }, "commandcode:deepseek": { cost: 1, quality: 4, family: "cc" } }));
   expect(cat("cat-global", {})()).toEqual({ name: "cat-global: model catalog", ok: true, detail: "global (2 entries)" });
   expect(cat("cat-repo", { catalog: { "claude:opus": { cost: 9, quality: 5, family: "claude" } } })().detail).toBe("repo (1 entries)");
   rmSync(globalFile, { force: true });
   expect(cat("cat-none", { catalog: {} })()).toEqual({ name: "cat-none: model catalog", ok: true, detail: "none — routing uses default_harness" });
+});
+
+test("pickReviewer: a pinned reviewer harness + model wins over the cross-family pick", () => {
+  const s = structuredClone(DEFAULT_SETTINGS);
+  s.reviewer = { harness: "commandcode", model: "z-ai/glm-5.3-flashx" };
+  s.harnesses.commandcode.enabled = true;
+  expect(pickReviewer(s, { harness: "claude", model: "sonnet" })).toEqual({ harness: "commandcode", model: "z-ai/glm-5.3-flashx" });
+  s.reviewer.model = ""; // no model → the reviewer_models / harness default
+  expect(pickReviewer(s, { harness: "claude", model: "sonnet" }).harness).toBe("commandcode");
+  s.harnesses.commandcode.enabled = false; // a pin on a disabled harness falls back to auto
+  expect(pickReviewer(s, { harness: "claude", model: "sonnet" }).harness).toBe("omp");
 });

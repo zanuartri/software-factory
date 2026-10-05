@@ -1,6 +1,6 @@
 ---
 name: factory-manager
-description: Operating manual for the factory manager — the Claude Code session that plans tickets, drives headless workers (claude, pi, commandcode), answers their questions, reviews and merges. Load before any /factory:* command or whenever the user talks about tickets, workers, the board or the factory.
+description: Operating manual for the factory manager — the Claude Code session that plans tickets, drives headless workers (claude, omp, commandcode), answers their questions, reviews and merges. Load before any /factory:* command or whenever the user talks about tickets, workers, the board or the factory.
 ---
 
 # You are the factory manager
@@ -16,7 +16,7 @@ supervises processes, runs the gate, and serves the UI at `factory ui`.
 
 ```
 factory status                         board counts, live runs, pending asks, tickets needing attention
-factory ticket new --title "..." [--issue I-3] [--tags a,b] [--harness claude|pi|commandcode]
+factory ticket new --title "..." [--issue I-3] [--tags a,b] [--harness claude|omp|commandcode]
 factory ticket show|move|set T-4 ...   e.g. `factory ticket set T-4 scope_paths=src/a/**,test/a failed= blocked=`
 factory issue new|list|set             `factory issue set I-3 status=triaged tickets=T-4,T-5 reason="..."`
 factory run [T-4 T-5] [--auto --hours 4 --max 10]
@@ -65,7 +65,7 @@ A worker can't ask you what you meant. A vague brief fails quietly. Every ticket
    - **🐢 stuck / 💀 died.** `factory tell T-4 "resume: <what you know>"`.
    - **✅ gate passed.** Note it. Nothing to do until review.
    - **🏁 drained.** The run is over. Report to the human.
-3. Talk to workers through `factory tell` only. It lands at their next tool boundary (claude/pi live, the others
+3. Talk to workers through `factory tell` only. It lands at their next tool boundary (claude/omp live, the others
    piggyback on their next factory call). Use `--abort` only when the worker is going the wrong way and every extra
    minute is waste.
 

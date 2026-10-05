@@ -1,7 +1,7 @@
 # Software Factory — design
 
 Local factory: one **manager** (a Claude Code session, per repo) plans and drives headless **workers**
-(claude, pi, commandcode) that each own one ticket in their own git worktree.
+(claude, omp, commandcode) that each own one ticket in their own git worktree.
 You talk only to the manager. The UI (clean console, light/dark) shows everything live and lets you steer.
 
 Trust comes from structure, not hope (ideas from cursor/plugins `pstack`):
@@ -25,13 +25,13 @@ src/            daemon + CLI (Bun, zero server deps: Bun.serve + bun:sqlite)
   db.ts         ~/.factory/factory.db — workspaces, runs, messages, events
   store.ts      <repo>/.factory/{tickets,issues}/*.md, rules.md, settings.json
   git.ts        worktrees, rebase, squash merge (CAS), revert, gc
-  adapters.ts   HarnessAdapter for claude | pi | commandcode
+  adapters.ts   HarnessAdapter for claude | omp | commandcode
   supervisor.ts scheduling, spawn, steer/abort, gate (scope + verify + cross-family review), merge
   mcp.ts        minimal MCP (streamable HTTP, JSON responses) — worker tools
   guard.ts      shared policy: writes stay in worktree+scope, no push/force/secret reads
   prompts.ts    worker / reviewer prompts
   cli.ts        `factory` CLI used by the manager + humans
-harness/        pi extension (bridge to daemon + guard)
+harness/        omp extension (bridge to daemon + guard)
 plugin/         Claude Code plugin `factory`: commands + skills
 ui/             React + Vite + Tailwind ops console
 ```
@@ -52,7 +52,7 @@ ui/             React + Vite + Tailwind ops console
 | harness | control | steer | abort | factory tools | guard |
 |---|---|---|---|---|---|
 | claude | `claude -p` stream-json in/out | stdin user msg | control_request interrupt | `--mcp-config` HTTP | `--settings` PreToolUse hook |
-| pi | `pi --mode rpc` | rpc `steer` | rpc `abort` | extension tools → HTTP | extension `tool_call` block |
+| omp | `omp --mode rpc` | rpc `steer` | rpc `abort` | extension tools → HTTP | extension `tool_call` block, `--approval-mode yolo` |
 | commandcode | `commandcode -p` NDJSON | piggyback | kill + `--resume` | `mcp add --scope local` per worktree | `~/.commandcode/settings.json` PreToolUse (env-gated) |
 
 Piggyback: every factory tool response carries pending manager messages, and the worker skill calls

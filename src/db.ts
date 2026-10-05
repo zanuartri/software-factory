@@ -49,7 +49,7 @@ export type Run = {
   attempt: number; parent: string | null; token: string; summary: string | null; tokens: number;
   started_at: number; heartbeat_at: number | null; ended_at: number | null;
 };
-export type Harness = "claude" | "pi" | "commandcode";
+export type Harness = "claude" | "omp" | "commandcode";
 export type Workspace = { id: string; name: string; path: string; manager: string | null; manager_seen: number | null; created_at: number };
 
 const listeners = new Set<(e: any) => void>();

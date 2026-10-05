@@ -6,7 +6,7 @@ import { Btn, Dot, Empty, HARNESS_COLOR, HarnessTag, inputCls, Md, STATUS_META, 
 
 const STATUS_OPTS: Opt[] = Object.entries(STATUS_META).map(([value, m]) => ({ value, label: m.label, icon: <StatusIcon status={value} /> }));
 const PRIORITY_OPTS: Opt[] = [["p0", "Urgent"], ["p1", "High"], ["p2", "Medium"], ["p3", "Low"]].map(([value, label]) => ({ value, label }));
-const HARNESS_OPTS: Opt[] = ["any", "claude", "pi", "commandcode"].map((h) => ({ value: h, label: h === "any" ? "Any (scheduler picks)" : h, icon: <span className="size-2 rounded-full" style={{ background: HARNESS_COLOR[h] }} /> }));
+const HARNESS_OPTS: Opt[] = ["any", "claude", "omp", "commandcode"].map((h) => ({ value: h, label: h === "any" ? "Any (scheduler picks)" : h, icon: <span className="size-2 rounded-full" style={{ background: HARNESS_COLOR[h] }} /> }));
 
 const TABS = [["brief", "Brief"], ["report", "Report"], ["runs", "Runs"], ["diff", "Diff"]] as const;
 const EDITABLE = ["Goal", "Context", "Acceptance", "Verify", "Timebox", "Forbidden"];
@@ -204,7 +204,7 @@ function Runs({ runs }: { runs: Run[] }) {
             <section>
               <H>Evidence</H>
               <div className="flex flex-wrap gap-1.5">
-                {detail.data.evidence.filter((f: string) => !/pi-sessions|transcript|settings|mcp\.json/.test(f)).map((f: string) => (
+                {detail.data.evidence.filter((f: string) => !/(omp|pi)-sessions|transcript|settings|mcp\.json/.test(f)).map((f: string) => (
                   <button key={f} onClick={() => api(`/api/runs/${sel}/file?f=${encodeURIComponent(f)}`, { text: true }).then((text) => setFile({ name: f, text }))}
                     className={`rounded-md border px-2 py-1 font-mono text-[11px] transition-colors ${file?.name === f ? "border-fg text-fg" : "border-border text-fg-muted hover:bg-hover"}`}>{f.replace(/\\/g, "/")}</button>
                 ))}

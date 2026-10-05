@@ -101,7 +101,7 @@ export function Rules({ ws, toast }: { ws: Workspace; toast: (m: string) => void
   );
 }
 
-const HARNESSES: Harness[] = ["claude", "pi", "commandcode"];
+const HARNESSES: Harness[] = ["claude", "omp", "commandcode"];
 
 const Row = ({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) => (
   <div className="grid items-start gap-2 px-4 py-4 md:grid-cols-[220px_1fr] md:gap-6 md:px-5">
@@ -209,7 +209,20 @@ export function Settings({ ws, toast }: { ws: Workspace; toast: (m: string) => v
 
           <Group title="Workers">
             <Row label="Max workers" hint="Parallel workers across all harnesses."><Stepper label="max workers" min={1} max={16} value={f.max_workers} onChange={(v) => setF({ ...f, max_workers: v })} /></Row>
-            <Row label="Reviewer order" hint="The first enabled harness that differs from the implementer reviews its work.">
+            <Row label="Reviewer" hint="Auto picks a different model family than the implementer. Pin a harness and model to review every ticket with it.">
+              <div className="grid max-w-xl grid-cols-2 gap-3">
+                <Field label="Harness">
+                  <Select ariaLabel="reviewer harness" value={f.reviewer?.harness ?? "auto"}
+                    options={[{ value: "auto", label: "Auto (cross-family)" }, ...HARNESSES.filter((h) => f.harnesses[h]?.enabled).map((h) => ({ value: h, label: h, icon: <span className="size-2 rounded-full" style={{ background: HARNESS_COLOR[h] }} /> }))]}
+                    onChange={(v) => setF({ ...f, reviewer: { harness: v, model: "" } })} />
+                </Field>
+                <Field label="Model">
+                  <Select ariaLabel="reviewer model" value={f.reviewer?.model ?? ""} disabled={(f.reviewer?.harness ?? "auto") === "auto"} searchable
+                    options={modelOpts(f.harnesses[f.reviewer?.harness]?.models ?? [])} onChange={(v) => setF({ ...f, reviewer: { ...f.reviewer, model: v } })} />
+                </Field>
+              </div>
+            </Row>
+            <Row label="Reviewer order" hint="Used by Auto: the first enabled harness that differs from the implementer reviews its work.">
               <div className="flex flex-wrap gap-1.5">
                 {f.reviewer_order.map((h: Harness, i: number) => (
                   <button key={h} title={i ? "Move up" : undefined} onClick={() => { if (!i) return; const o = [...f.reviewer_order]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setF({ ...f, reviewer_order: o }); }}

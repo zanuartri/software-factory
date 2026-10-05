@@ -2,6 +2,7 @@
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Harness } from "./db";
+import { TOOLS } from "./mcp";
 import { ROOT } from "./prompts";
 
 export type Caps = { liveSteer: boolean; abort: boolean; resume: boolean; oneProcPerTurn: boolean };
@@ -32,7 +33,7 @@ export function killTree(pid: number | null | undefined) {
   else try { process.kill(-pid, "SIGKILL"); } catch { try { process.kill(pid, "SIGKILL"); } catch {} }
 }
 
-/** Strict LF framing (pi docs: never split on U+2028). */
+/** Strict LF framing (omp/pi docs: never split on U+2028). */
 async function lines(stream: ReadableStream<Uint8Array>, onLine: (l: string) => void) {
   const dec = new TextDecoder();
   let buf = "";
@@ -107,22 +108,22 @@ const claude: Adapter = {
   },
 };
 
-// ---------------------------------------------------------------- pi (rpc)
-const pi: Adapter = {
+// ---------------------------------------------------------------- omp (rpc)
+const omp: Adapter = {
   caps: { liveSteer: true, abort: true, resume: true, oneProcPerTurn: false },
   async start(o) {
-    const args = [...bin("pi"), "--mode", "rpc", "--session-dir", join(o.runDir, "pi-sessions"),
-      "-e", join(ROOT, "harness", "pi-extension.ts"), "--approve"];
+    const args = [...bin("omp"), "--mode", "rpc", "--session-dir", join(o.runDir, "omp-sessions"),
+      "-e", join(ROOT, "harness", "omp-extension.ts"), "--approval-mode", "yolo"]; // guard = extension tool_call hook; nobody can answer a prompt headless
     if (o.model) args.push("--model", o.model);
     if (o.resumeSession) args.push("--continue");
-    if (o.role === "reviewer") args.push("--tools", "read,grep,find,ls,factory_report,factory_decision,factory_verdict,factory_ask");
+    if (o.role === "reviewer") args.push("--tools", ["read", "grep", "glob", ...TOOLS.filter((t) => (t.roles as readonly string[]).includes("reviewer")).map((t) => t.name)].join(",")); // read-only built-ins + the reviewer's factory tools
     const p = Bun.spawn(args, { cwd: o.cwd, env: baseEnv(o), stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true });
     const log = transcript(o);
     const write = (obj: any) => { p.stdin.write(JSON.stringify(obj) + "\n"); p.stdin.flush(); };
     let running = false;
     lines(p.stdout, (l) => {
       const e = tryJson(l);
-      if (e?.type !== "message_update") log(l); // streaming deltas would bloat the transcript 50x; message_end has the full text
+      if (e?.type !== "message_update" && e?.type !== "extension_ui_request") log(l); // streaming deltas and widget chatter would bloat the transcript
       if (!e) return;
       if (e.type === "agent_start") running = true;
       if (e.type === "tool_execution_start") o.onEvent({ type: "tool", name: e.toolName, detail: JSON.stringify(e.args ?? {}).slice(0, 200) });
@@ -130,7 +131,7 @@ const pi: Adapter = {
         const text = (e.message.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
         if (text) o.onEvent({ type: "text", text });
       }
-      if (e.type === "agent_settled") { running = false; o.onEvent({ type: "turn_end" }); }
+      if (e.type === "session_settled") { running = false; o.onEvent({ type: "turn_end" }); }
       if (e.type === "response" && e.command === "get_state" && e.data?.sessionId) o.onEvent({ type: "session", id: e.data.sessionId });
     });
     lines(p.stderr, (l) => log(JSON.stringify({ stderr: l })));
@@ -196,4 +197,4 @@ const commandcode: Adapter = {
   },
 };
 
-export const ADAPTERS: Record<Harness, Adapter> = { claude, pi, commandcode };
+export const ADAPTERS: Record<Harness, Adapter> = { claude, omp, commandcode };

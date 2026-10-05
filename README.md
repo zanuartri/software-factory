@@ -1,7 +1,7 @@
 # Software Factory
 
 A local factory for headless coding agents. You talk to one **manager** (a Claude Code session). It plans
-tickets and hands each one to a **worker**: claude, pi or commandcode, each in its own git worktree.
+tickets and hands each one to a **worker**: claude, omp or commandcode, each in its own git worktree.
 Workers can't mark their own homework. The daemon re-runs the ticket's Verify commands, checks that the diff
 stays in scope, and has a **different model family** review the work before a ticket reaches review. Green
 tickets auto-merge. If the base branch breaks after a merge, the merge is reverted automatically.
@@ -45,7 +45,7 @@ Light, dark, or system theme.
 
 ```
 src/        daemon (Bun.serve + bun:sqlite), CLI, adapters, supervisor, gate, guard, minimal MCP
-harness/    pi extension (factory tools + guard)
+harness/    omp extension (factory tools + guard)
 plugin/     Claude Code plugin: /factory:* commands + manager / worker / reviewer skills
 ui/         React + Vite + Tailwind console
 ~/.factory  factory.db, worktrees/<ws>/<ticket>, runs/<ws>/<ticket>/<run> (transcripts, decisions.tsv, gate evidence)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type Harness = "claude" | "pi" | "commandcode";
+export type Harness = "claude" | "omp" | "commandcode";
 export type Ticket = {
   id: string; title: string; status: "draft" | "open" | "in_progress" | "in_review" | "done"; priority: string;
   tags: string[]; depends_on: string[]; scope_paths: string[]; harness: Harness | "any"; model: string;
@@ -16,6 +16,7 @@ export type FEvent = { id: number; ws: string; ticket?: string; run?: string; ty
 export type Ask = { id: number; ws: string; ticket: string; run: string; question: string; options: string; default_answer: string; irreversible: number; answer: string | null; answered_by: string | null; created_at: number; deadline: number };
 export type Issue = { id: string; title: string; status: string; kind: string; tags: string[]; tickets: string[]; body: string; reason?: string | null; created: string };
 export type Models = Record<Harness, { id: string; hint?: string }[]>;
+export type ReviewerPick = { harness: Harness | "auto"; model: string };
 export type Workspace = { id: string; name: string; path: string; manager: string | null; manager_seen: number | null; settings: any; plan: any };
 
 export async function api<T = any>(path: string, init?: { method?: string; body?: unknown; text?: boolean }): Promise<T> {

@@ -1,4 +1,4 @@
-// One policy for every harness. CLI mode = PreToolUse hook (claude, commandcode); import mode = pi extension.
+// One policy for every harness. CLI mode = PreToolUse hook (claude, commandcode); import mode = omp extension.
 // No FACTORY_RUN_ID in env → not a factory worker → allow everything.
 import { isAbsolute, relative, resolve } from "node:path";
 
@@ -31,7 +31,7 @@ export function kind(tool: string): "write" | "shell" | "read" | "other" {
 
 const pathOf = (input: any): string | undefined => input?.file_path ?? input?.filePath ?? input?.path ?? input?.notebook_path;
 
-/** Portable glob → RegExp (pi runs on node, hooks on bun): supports ** * ? {a,b}. */
+/** Portable glob → RegExp (extensions load in the harness runtime, hooks on bun): supports ** * ? {a,b}. */
 export function globRe(g: string) {
   let re = "";
   for (let i = 0; i < g.length; i++) {

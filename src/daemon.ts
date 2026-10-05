@@ -148,7 +148,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       return p.startsWith(dir) && existsSync(p) ? new Response(Bun.file(p)) : json({ error: "not found" }, 404);
     },
   },
-  // pi extension bridge + guard reports (token-authenticated like MCP)
+  // omp extension bridge + guard reports (token-authenticated like MCP)
   "/api/runs/:id/tool/:name": {
     POST: async (req) => {
       const r = getRun(req.params.id);

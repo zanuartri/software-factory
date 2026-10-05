@@ -181,6 +181,8 @@ export function pickWorker(s: store.Settings, t: store.Ticket, running: Run[], a
 }
 
 export function pickReviewer(s: store.Settings, impl: { harness: Harness; model: string }): { harness: Harness; model: string } {
+  const pin = s.reviewer.harness; // an explicit choice in settings wins over every heuristic below
+  if (pin !== "auto" && s.harnesses[pin]?.enabled) return { harness: pin, model: s.reviewer.model || s.reviewer_models[pin] || s.harnesses[pin].model };
   if (Object.keys(s.catalog).length) {
     const implEntry = s.catalog[`${impl.harness}:${impl.model}`];
     const minQuality = Math.max(4, implEntry ? effectiveQuality(`${impl.harness}:${impl.model}`, implEntry.quality) : 0);
@@ -581,7 +583,7 @@ export function steer(runId: string, text: string) {
 export async function abortRun(runId: string, text?: string) {
   const r = getRun(runId);
   if (!r) throw new Error("unknown run");
-  if (text && ADAPTERS[r.harness].caps.oneProcPerTurn) aborting.add(runId); // only a killed process-per-turn leaks a late turn_end; claude/pi steer in-band
+  if (text && ADAPTERS[r.harness].caps.oneProcPerTurn) aborting.add(runId); // only a killed process-per-turn leaks a late turn_end; claude/omp steer in-band
   try {
     await handles.get(runId)?.abort();
     emit(r.ws, "run.abort", { text }, { ticket: r.ticket, run: runId });
@@ -738,7 +740,7 @@ export function reviewerCheck(s: store.Settings): { ok: boolean; detail: string 
 export function doctor(ws?: string) {
   const checks: { name: string; ok: boolean; detail: string }[] = [];
   const add = (name: string, ok: boolean, detail = "") => checks.push({ name, ok, detail });
-  for (const bin of ["git", "claude", "pi", "commandcode", "gh"]) add(`bin:${bin}`, !!Bun.which(bin), Bun.which(bin) ?? "not on PATH");
+  for (const bin of ["git", "claude", "omp", "commandcode", "gh"]) add(`bin:${bin}`, !!Bun.which(bin), Bun.which(bin) ?? "not on PATH");
   const bash = bashPath();
   const bashOk = process.platform === "win32" ? existsSync(bash) : !!Bun.which(bash);
   add("bin:bash", bashOk, bashOk ? bash : `${bash} not found (PATH bash: ${Bun.which("bash") ?? "none"})`);

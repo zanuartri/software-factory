@@ -25,8 +25,8 @@ async function run(h: Harness, args: string[]) {
 
 /** Parsers are exported for the test; each takes the CLI's raw stdout. */
 export const parse = {
-  pi: (out: string): Model[] => out.split("\n").slice(1).map((l) => l.trim().split(/\s+/)).filter((c) => c.length >= 2 && c[0] && c[1])
-    .map(([provider, model, ctx]) => ({ id: `${provider}/${model}`, hint: ctx ? `${ctx} context` : undefined })),
+  // `omp models --json`: every chat model as a provider-qualified selector ("openai-codex/gpt-6-luna")
+  omp: (out: string): Model[] => { try { return (JSON.parse(out).models ?? []).filter((m: any) => m.kind === "chat").map((m: any) => ({ id: m.selector, hint: m.contextWindow ? `${Math.round(m.contextWindow / 1000)}K context` : undefined })); } catch { return []; } },
   // ids are "vendor/model" or bare "claude-sonnet-5"; headings ("Anthropic") and the banner have no dash/slash id + 2-space gap
   commandcode: (out: string): Model[] => out.split("\n").map((l) => l.trim().match(/^([a-z0-9][\w.:/-]*[-/][\w.:/-]*)\s{2,}(.*)$/)).filter(Boolean)
     .map((m) => ({ id: m![1], hint: m![2].trim() || undefined })),
@@ -34,7 +34,7 @@ export const parse = {
 
 const discover: Record<Harness, () => Promise<Model[]>> = {
   claude: async () => CLAUDE,
-  pi: async () => parse.pi(await run("pi", ["--list-models"])),
+  omp: async () => parse.omp(await run("omp", ["models", "--json"])),
   commandcode: async () => parse.commandcode(await run("commandcode", ["--list-models"])),
 };
 
@@ -42,7 +42,7 @@ let mem: { at: number; models: Record<Harness, Model[]> } | null = existsSync(CA
 let inflight: Promise<Record<Harness, Model[]>> | null = null;
 
 export async function listModels(refresh = false) {
-  if (!refresh && mem && Date.now() - mem.at < TTL) return mem.models;
+  if (!refresh && mem && Date.now() - mem.at < TTL && Object.keys(discover).every((h) => h in mem!.models)) return mem.models; // a cache from before a harness existed must not hide it
   inflight ??= (async () => {
     const hs = Object.keys(discover) as Harness[];
     const lists = await Promise.all(hs.map((h) => discover[h]().catch(() => [] as Model[])));

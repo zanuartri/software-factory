@@ -8,7 +8,7 @@ process.env.FACTORY_HOME = home;
 const { CATALOG_FROM_GLOBAL, DEFAULT_SETTINGS, loadSettings, readTicket, saveSettings, settingsPatch, updateTicket } = await import("./store");
 
 const CATALOG = {
-  "pi:hy3": { cost: 2, quality: 5, family: "pi" },
+  "omp:hy3": { cost: 2, quality: 5, family: "omp" },
   "commandcode:deepseek": { cost: 1, quality: 4, family: "cc" },
 };
 const globalFile = join(home, "catalog.json");
@@ -37,47 +37,47 @@ test("settingsPatch: coerces number, boolean, array, string", () => {
   const p = settingsPatch(DEFAULT_SETTINGS, [
     "max_workers=2",
     "auto_merge=false",
-    'reviewer_order=["pi","claude"]',
-    "default_harness=pi",
+    'reviewer_order=["omp","claude"]',
+    "default_harness=omp",
   ]);
   expect(p.max_workers).toBe(2);
   expect(p.auto_merge).toBe(false);
-  expect(p.reviewer_order).toEqual(["pi", "claude"]);
-  expect(p.default_harness).toBe("pi");
+  expect(p.reviewer_order).toEqual(["omp", "claude"]);
+  expect(p.default_harness).toBe("omp");
 });
 
 test("settingsPatch: dotted nested key keeps sibling harness fields", () => {
-  const p = settingsPatch(DEFAULT_SETTINGS, ["harnesses.pi.model=foo"]);
-  expect(p.harnesses!.pi).toEqual({ enabled: true, model: "foo", models: [] });
+  const p = settingsPatch(DEFAULT_SETTINGS, ["harnesses.omp.model=foo"]);
+  expect(p.harnesses!.omp).toEqual({ ...DEFAULT_SETTINGS.harnesses.omp, model: "foo" });
   expect(p.harnesses!.claude).toEqual(DEFAULT_SETTINGS.harnesses.claude);
 });
 
 test("settingsPatch: multiple pairs touch only their top-level keys", () => {
-  const p = settingsPatch(DEFAULT_SETTINGS, ["max_workers=2", "harnesses.pi.model=foo"]);
+  const p = settingsPatch(DEFAULT_SETTINGS, ["max_workers=2", "harnesses.omp.model=foo"]);
   expect(Object.keys(p).sort()).toEqual(["harnesses", "max_workers"]);
   expect(p.max_workers).toBe(2);
-  expect(p.harnesses!.pi.model).toBe("foo");
+  expect(p.harnesses!.omp.model).toBe("foo");
 });
 
 test("settingsPatch: array field accepts PowerShell-stripped bracket syntax", () => {
-  const p = settingsPatch(DEFAULT_SETTINGS, ["reviewer_order=[claude,pi]"]);
-  expect(p.reviewer_order).toEqual(["claude", "pi"]);
+  const p = settingsPatch(DEFAULT_SETTINGS, ["reviewer_order=[claude,omp]"]);
+  expect(p.reviewer_order).toEqual(["claude", "omp"]);
 });
 
 test("settingsPatch: array field accepts bare comma list", () => {
-  const p = settingsPatch(DEFAULT_SETTINGS, ["reviewer_order=claude,pi"]);
-  expect(p.reviewer_order).toEqual(["claude", "pi"]);
+  const p = settingsPatch(DEFAULT_SETTINGS, ["reviewer_order=claude,omp"]);
+  expect(p.reviewer_order).toEqual(["claude", "omp"]);
 });
 
 test("settingsPatch: array field still accepts valid JSON", () => {
-  const p = settingsPatch(DEFAULT_SETTINGS, ['reviewer_order=["claude","pi"]']);
-  expect(p.reviewer_order).toEqual(["claude", "pi"]);
+  const p = settingsPatch(DEFAULT_SETTINGS, ['reviewer_order=["claude","omp"]']);
+  expect(p.reviewer_order).toEqual(["claude", "omp"]);
 });
 
 test("settingsPatch: does not mutate DEFAULT_SETTINGS", () => {
-  settingsPatch(DEFAULT_SETTINGS, ["harnesses.pi.model=foo", "reviewer_order=claude,pi"]);
-  expect(DEFAULT_SETTINGS.harnesses.pi.model).toBe("");
-  expect(DEFAULT_SETTINGS.reviewer_order).toEqual(["pi", "commandcode", "claude"]);
+  settingsPatch(DEFAULT_SETTINGS, ["harnesses.omp.model=foo", "reviewer_order=claude,omp"]);
+  expect(DEFAULT_SETTINGS.harnesses.omp.model).not.toBe("foo");
+  expect(DEFAULT_SETTINGS.reviewer_order).toEqual(["omp", "commandcode", "claude"]);
 });
 
 test("settingsPatch: pair without '=' throws naming the bad arg", () => {
@@ -100,7 +100,7 @@ test("settingsPatch: empty value throws naming the bad arg", () => {
 
 test("settingsPatch: array setting corrupted into a string heals via the default type", () => {
   const cur = { ...DEFAULT_SETTINGS, reviewer_order: "[claude]" as any };
-  expect(settingsPatch(cur, ["reviewer_order=[claude,pi]"]).reviewer_order).toEqual(["claude", "pi"]);
+  expect(settingsPatch(cur, ["reviewer_order=[claude,omp]"]).reviewer_order).toEqual(["claude", "omp"]);
 });
 
 test("loadSettings: a global catalog fills in when the repo has none", () => {
@@ -139,7 +139,7 @@ test("loadSettings: a settings save never copies the global catalog into the rep
 
 test("loadSettings: the repo's own catalog survives a settings save", () => {
   setGlobal(JSON.stringify(CATALOG));
-  const own = { "pi:hy3": { cost: 2, quality: 5, family: "pi" } };
+  const own = { "omp:hy3": { cost: 2, quality: 5, family: "omp" } };
   const repo = mkRepo({ catalog: own });
   saveSettings(repo, { ...loadSettings(repo), max_workers: 2 });
   expect(savedRepo(repo).catalog).toEqual(own);
@@ -207,4 +207,19 @@ test("updateTicket: a null attempts is written as 0", () => {
   expect(text).toContain("attempts: 0\n");
   expect(text).not.toContain("attempts: null");
   expect(readTicket(f).attempts).toBe(0);
+});
+
+test("loadSettings ignores a harness that no longer exists in an old settings file", () => {
+  const repo = mkdtempSync(join(tmpdir(), "factory-old-"));
+  mkdirSync(join(repo, ".factory"), { recursive: true });
+  writeFileSync(join(repo, ".factory", "settings.json"), JSON.stringify({
+    default_harness: "pi", harnesses: { pi: { enabled: true, model: "x", models: [] } },
+    reviewer: { harness: "opencode", model: "m" }, reviewer_order: ["pi", "claude"], reviewer_models: { pi: "a", claude: "opus" },
+  }));
+  const s = loadSettings(repo);
+  expect(Object.keys(s.harnesses).sort()).toEqual(["claude", "commandcode", "omp"]);
+  expect(s.default_harness).toBe("claude");
+  expect(s.reviewer).toEqual({ harness: "auto", model: "m" });
+  expect(s.reviewer_order).toEqual(["claude"]);
+  expect(Object.keys(s.reviewer_models).sort()).toEqual(["claude", "commandcode", "omp"]);
 });

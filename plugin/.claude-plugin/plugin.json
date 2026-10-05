@@ -1,6 +1,6 @@
 {
   "name": "factory",
   "version": "0.1.0",
-  "description": "Software factory: a manager session drives headless claude / pi / commandcode workers through tickets, worktrees, an independent verify + cross-family review gate, and auto-merge.",
+  "description": "Software factory: a manager session drives headless claude / omp / commandcode workers through tickets, worktrees, an independent verify + cross-family review gate, and auto-merge.",
   "author": { "name": "zen" }
 }

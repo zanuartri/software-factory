@@ -13,14 +13,15 @@
       ],
       "max": 0
     },
-    "pi": {
+    "omp": {
       "enabled": true,
-      "model": "opencode-go/deepseek-v4.1-flash",
+      "model": "anthropic/claude-sonnet-5-5",
       "models": [
-        "opencode-go/deepseek-v4.1-flash",
-        "opencode-go/glm-5.3-flash",
-        "opencode-go/hy3",
-        "opencode-go/mimo-v2.6-flash"
+        "anthropic/claude-sonnet-5-5",
+        "anthropic/claude-opus-5-5",
+        "openai-codex/gpt-6-luna",
+        "openai-codex/gpt-6-sol",
+        "opencode-go/deepseek-v4.1-flash"
       ]
     },
     "commandcode": {
@@ -38,13 +39,13 @@
   "default_harness": "commandcode",
   "max_workers": 5,
   "reviewer_order": [
-    "pi",
+    "omp",
     "commandcode",
     "claude"
   ],
   "reviewer_models": {
     "claude": "claude-opus-5-5",
-    "pi": "opencode-go/glm-5.3-flash",
+    "omp": "openai-codex/gpt-6-sol",
     "commandcode": "z-ai/glm-5.3-flashx"
   },
   "verify_cmd": "bun install --frozen-lockfile && bun test src && bunx tsc -p . && cd ui && bun install --frozen-lockfile && bunx tsc -p . --noEmit && bun run build",
@@ -69,26 +70,6 @@
       "quality": 5,
       "family": "glm"
     },
-    "pi:opencode-go/deepseek-v4.1-flash": {
-      "cost": 2,
-      "quality": 3,
-      "family": "deepseek"
-    },
-    "pi:opencode-go/mimo-v2.6-flash": {
-      "cost": 2,
-      "quality": 3,
-      "family": "mimo"
-    },
-    "pi:opencode-go/hy3": {
-      "cost": 2,
-      "quality": 3,
-      "family": "hunyuan"
-    },
-    "pi:opencode-go/glm-5.3-flash": {
-      "cost": 2.5,
-      "quality": 3,
-      "family": "glm"
-    },
     "claude:claude-sonnet-5": {
       "cost": 8,
       "quality": 4,
@@ -104,6 +85,37 @@
       "caps": [
         "ui"
       ]
+    },
+    "omp:anthropic/claude-sonnet-5-5": {
+      "cost": 8,
+      "quality": 4,
+      "family": "anthropic",
+      "caps": [
+        "ui"
+      ]
+    },
+    "omp:anthropic/claude-opus-5-5": {
+      "cost": 15,
+      "quality": 5,
+      "family": "anthropic",
+      "caps": [
+        "ui"
+      ]
+    },
+    "omp:openai-codex/gpt-6-luna": {
+      "cost": 5,
+      "quality": 4,
+      "family": "openai"
+    },
+    "omp:openai-codex/gpt-6-sol": {
+      "cost": 10,
+      "quality": 5,
+      "family": "openai"
+    },
+    "omp:opencode-go/deepseek-v4.1-flash": {
+      "cost": 2,
+      "quality": 3,
+      "family": "deepseek"
     }
   },
   "allowed_tools": [
@@ -128,5 +140,9 @@
     "tickets": 10
   },
   "ask_timeout_min": 20,
-  "max_attempts": 3
+  "max_attempts": 3,
+  "reviewer": {
+    "harness": "auto",
+    "model": ""
+  }
 }

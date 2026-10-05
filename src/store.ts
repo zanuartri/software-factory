@@ -22,18 +22,23 @@ export type Issue = {
 
 export const SECTIONS = ["Goal", "Context", "Acceptance", "Verify", "Timebox", "Forbidden", "Report"] as const;
 
+/** omp model selectors enabled by default: provider-qualified so the pick never depends on fuzzy matching. */
+const OMP_MODELS = ["anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5", "openai-codex/gpt-6-luna", "openai-codex/gpt-6-sol", "opencode-go/deepseek-v4.1-flash"];
+
 export const DEFAULT_SETTINGS = {
   base_branch: "main",
   /** models = the ones enabled for pickers (default, reviewer, per-ticket); empty = only the harness default */
   harnesses: {
     claude: { enabled: true, model: "sonnet", models: ["sonnet", "opus", "haiku"] },
-    pi: { enabled: true, model: "", models: [] },
+    omp: { enabled: true, model: "anthropic/claude-sonnet-5-5", models: OMP_MODELS },
     commandcode: { enabled: false, model: "", models: [] },
   } as Record<Harness, { enabled: boolean; model: string; models: string[] }>,
   default_harness: "claude" as Harness,
   max_workers: 3,
-  reviewer_order: ["pi", "commandcode", "claude"] as Harness[],
-  reviewer_models: { claude: "opus", pi: "", commandcode: "" } as Record<Harness, string>,
+  /** "auto" = cross-family pick (catalog, then reviewer_order); a harness pins every review to it, with `model` (empty = reviewer_models / harness default) */
+  reviewer: { harness: "auto" as Harness | "auto", model: "" },
+  reviewer_order: ["omp", "commandcode", "claude"] as Harness[],
+  reviewer_models: { claude: "opus", omp: "", commandcode: "" } as Record<Harness, string>,
   verify_cmd: "",
   /** cost-first routing: keyed "<harness>:<model>"; empty = today's pickHarness/pickReviewer behavior unchanged */
   catalog: {} as Record<string, { cost: number; quality: number; family: string; caps?: string[] }>,
@@ -76,7 +81,15 @@ export function loadSettings(repo: string): Settings {
   const harnesses = Object.fromEntries(Object.entries(DEFAULT_SETTINGS.harnesses).map(([h, d]) => [h, { ...d, ...raw.harnesses?.[h] }])) as Settings["harnesses"];
   const own = isCatalog(raw.catalog) ? raw.catalog : {};
   const inherited = !Object.keys(own).length;
-  const s = { ...DEFAULT_SETTINGS, ...raw, harnesses, catalog: inherited ? globalCatalog() : own };
+  const known = Object.keys(DEFAULT_SETTINGS.harnesses) as Harness[]; // a harness removed from the product (pi, opencode) may linger in an old file
+  const reviewer = { ...DEFAULT_SETTINGS.reviewer, ...raw.reviewer };
+  const s = {
+    ...DEFAULT_SETTINGS, ...raw, harnesses, catalog: inherited ? globalCatalog() : own,
+    default_harness: known.includes(raw.default_harness) ? raw.default_harness : DEFAULT_SETTINGS.default_harness,
+    reviewer: { harness: reviewer.harness === "auto" || known.includes(reviewer.harness) ? reviewer.harness : "auto", model: String(reviewer.model ?? "") },
+    reviewer_order: (raw.reviewer_order ?? DEFAULT_SETTINGS.reviewer_order).filter((h: Harness) => known.includes(h)),
+    reviewer_models: { ...DEFAULT_SETTINGS.reviewer_models, ...Object.fromEntries(Object.entries(raw.reviewer_models ?? {}).filter(([h]) => known.includes(h as Harness))) },
+  };
   if (inherited) s[CATALOG_FROM_GLOBAL] = true;
   return s;
 }
