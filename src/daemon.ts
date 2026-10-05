@@ -128,7 +128,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
         await herdr.closePane(old.pane_id);
         await Bun.sleep(500);
       }
-      const session = await herdr.startClaude(w.path, w.name, herdr.agentName(w.id), b.resume ? w.manager ?? undefined : undefined);
+      const session = await herdr.startClaude(w.path, w.name, herdr.agentName(w.id), b.resume ? w.manager ?? undefined : undefined, herdr.managerBrief(w));
       sup.attachManager(w.id, session, true);
       return json({ session });
     },
@@ -144,7 +144,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
 
   "/api/ws/:ws/tickets": {
     GET: ({ params }) => json(store.listTickets(wsPath(params.ws)).map((t) => ({ ...t, brief_errors: store.validateBrief(t) }))),
-    POST: async (req) => { const t = store.createTicket(wsPath(req.params.ws), await body(req)); emit(req.params.ws, "ticket.created", { id: t.id }, { ticket: t.id }); return json(t); },
+    POST: async (req) => { const t = store.createTicket(wsPath(req.params.ws), await body(req)); emit(req.params.ws, "ticket.created", { id: t.id }, { ticket: t.id }); return json({ ...t, brief_errors: store.validateBrief(t) }); },
   },
   "/api/ws/:ws/tickets/:id": {
     GET: ({ params }) => {

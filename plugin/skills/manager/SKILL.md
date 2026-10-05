@@ -21,8 +21,10 @@ broad reading to read-only subagents, read worker output only when something nee
 
 ```
 factory status                         board counts, live runs, pending asks, tickets needing attention
-factory ticket new --title "..." [--issue I-3] [--tags a,b] [--harness claude|omp|commandcode]
-factory ticket list|show|move|set T-4  e.g. `factory ticket set T-4 scope_paths=src/a/**,test/a failed= blocked=`
+factory ticket new --title "..." --goal "..." --acceptance "line one\nline two" --verify "cmd" --scope a.js,a.test.js --timebox 30m
+                                       [--context "..." --forbidden "..." --difficulty low|medium|high --depends T-1 --tags a,b --issue I-3 --harness omp]
+                                       a complete brief in ONE command (acceptance lines get their checkboxes; brief errors are printed)
+factory ticket list|show|move|set T-4  `ticket set T-4 --goal "..." --verify "..."` rewrites a section; `ticket set T-4 scope_paths=a/** failed= blocked=` sets fields
 factory issue new|list|set             `factory issue set I-3 status=triaged tickets=T-4,T-5 reason="..."`
 factory run [T-4 T-5] [--auto --hours 4 --max 10]
 factory wait                           blocks until manager events; ALWAYS run it in the background
@@ -31,8 +33,8 @@ factory answer <askId> "answer"        answer a worker question
 factory log <runId> | diff T-4 | merge T-4 | gc [--apply] | doctor | settings [set '{json}']
 ```
 
-Ticket files live at `.factory/tickets/T-xxx-*.md`; edit their body sections with your file tools and use the CLI for
-status moves (it validates).
+Prefer the flags above to hand-editing ticket files (no scripts, no shell heredocs). The files live at
+`.factory/tickets/T-xxx-*.md` if you need to read one; use the CLI for status moves (it validates).
 
 ## Standing orders (`.factory/rules.md`)
 
@@ -54,7 +56,8 @@ diff. Don't add rules to compensate for a bad brief. Fix the brief.
 
 ## Drain loop (after `factory run`)
 
-1. Start `factory wait` **in the background** (Bash `run_in_background: true`). Never sleep-poll.
+1. Start `factory wait` **in the background** (Bash `run_in_background: true`, no `| tail`). Never sleep-poll. `factory run`
+   marks "now" as the start of the drain, so `wait` only reports what happens next.
 2. When it returns, handle every event, then start `factory wait` again:
    - **❓ ask.** Answer it yourself when the brief, the standing orders, or the code settle it and the choice is
      reversible → `factory answer`. Escalate to the human (AskUserQuestion, options with your recommendation first)

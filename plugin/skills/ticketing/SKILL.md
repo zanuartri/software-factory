@@ -24,6 +24,17 @@ concrete, and checkable. Spend your care here, not on supervising.
 - **difficulty**: `low` / `medium` / `high`. It drives cost-first routing, so set it honestly. Leave `harness`/`model`
   as `any`/`default` unless you have a reason (e.g. UI-heavy → a model strong at frontend).
 
+## Creating one
+
+```
+factory ticket new --title "add mod() to ops.js" --goal "ops.js exports mod(a, b): the remainder; it throws on b = 0" \
+  --acceptance "mod(10, 3) is 1\nmod(1, 0) throws 'modulo by zero'" --verify "bun test ops.test.js" \
+  --scope ops.js,ops.test.js --timebox 20m --difficulty low --tags feature
+```
+
+One command fills the whole brief and prints any brief error. `factory ticket set T-4 --verify "..."` rewrites a section
+later. Then `factory ticket move T-4 open` (or `/factory:release` for several).
+
 ## Sizing heuristics
 
 - Touches > 5 files across modules, or needs two unrelated verifications → split.

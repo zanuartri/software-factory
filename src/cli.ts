@@ -75,6 +75,28 @@ const kv = (pairs: string[]) => Object.fromEntries(pairs.map((p) => {
 }));
 const line = (t: any) => `${t.id.padEnd(6)} ${t.status.padEnd(11)} ${(t.priority ?? "").padEnd(3)} ${t.blocked ? "⛔" : t.failed ? "✖" : " "} ${t.title}${t.blocked ? `  (blocked: ${t.blocked})` : ""}${t.failed ? `  (failed: ${t.failed})` : ""}`;
 const cursorFile = (ws: string) => join(HOME, `cursor-${ws}`);
+const list = (v: unknown) => (typeof v === "string" ? v.split(",").map((s) => s.trim()).filter(Boolean) : undefined);
+/** A whole brief from flags, so a ticket is one command: --goal --context --acceptance --verify --timebox --forbidden --scope a,b --depends T-1 --difficulty. */
+function briefFlags() {
+  const sec: Record<string, string> = {};
+  for (const [flag, name] of [["goal", "Goal"], ["context", "Context"], ["acceptance", "Acceptance"], ["verify", "Verify"], ["timebox", "Timebox"], ["forbidden", "Forbidden"]] as const) {
+    const raw = flags[flag];
+    if (typeof raw !== "string") continue;
+    const v = raw.split("\\n").join("\n"); // a typed \n (shells don't expand it inside quotes) is a line break
+    // Acceptance lines without a checkbox get one, so "a\nb" is enough
+    sec[name] = flag === "acceptance" ? v.split(/\r?\n/).filter((l) => l.trim()).map((l) => (/^\s*- \[[ x]\]/.test(l) ? l : `- [ ] ${l.replace(/^\s*[-*]\s*/, "")}`)).join("\n") : v;
+  }
+  return {
+    ...(Object.keys(sec).length ? { sections: sec } : {}),
+    ...(list(flags.scope) ? { scope_paths: list(flags.scope) } : {}), ...(list(flags.depends) ? { depends_on: list(flags.depends) } : {}),
+    ...(typeof flags.difficulty === "string" ? { difficulty: flags.difficulty } : {}), ...(typeof flags.model === "string" ? { model: flags.model } : {}),
+  };
+}
+/** Marks "now" as the start of this drain, so `factory wait` reports what happens next, not the workspace's whole history. */
+async function markNow(ws: string) {
+  const ev = await api("GET", `/api/ws/${ws}/events?limit=1`);
+  if (ev.at(-1)) writeFileSync(cursorFile(ws), String(ev.at(-1).id));
+}
 
 function fmtEvent(e: any) {
   const d = e.data ?? {};
@@ -140,8 +162,8 @@ switch (cmd) {
   case "ticket": {
     const w = await currentWs();
     if (sub === "new") {
-      const t = await api("POST", `/api/ws/${w.id}/tickets`, { title: (flags.title as string) || rest.join(" ") || die("--title required"), issue: flags.issue, harness: flags.harness, priority: flags.priority, tags: typeof flags.tags === "string" ? flags.tags.split(",") : undefined });
-      out(`${t.id} ${t.file}`, t);
+      const t = await api("POST", `/api/ws/${w.id}/tickets`, { title: (flags.title as string) || rest.join(" ") || die("--title required"), issue: flags.issue, harness: flags.harness, priority: flags.priority, tags: typeof flags.tags === "string" ? flags.tags.split(",") : undefined, ...briefFlags() });
+      out(`${t.id} ${t.file}${t.brief_errors?.length ? `\nbrief errors: ${t.brief_errors.join("; ")}` : ""}`, t);
     } else if (sub === "list" || !sub) {
       const ts = (await api("GET", `/api/ws/${w.id}/tickets`)).filter((t: any) => !flags.status || t.status === flags.status);
       out(ts.map(line).join("\n") || "(no tickets)", ts);
@@ -152,7 +174,7 @@ switch (cmd) {
       const t = await api("PATCH", `/api/ws/${w.id}/tickets/${rest[0]}`, { status: rest[1] });
       out(line(t), t);
     } else if (sub === "set") {
-      const t = await api("PATCH", `/api/ws/${w.id}/tickets/${rest[0]}`, kv(rest.slice(1)));
+      const t = await api("PATCH", `/api/ws/${w.id}/tickets/${rest[0]}`, { ...kv(rest.slice(1)), ...briefFlags() });
       out(line(t), t);
     } else die("ticket new|list|show|move|set");
     break;
@@ -177,6 +199,7 @@ switch (cmd) {
 
   case "run": {
     const w = await currentWs();
+    await markNow(w.id);
     const p = await api("POST", `/api/ws/${w.id}/run`, { only: [sub, ...rest].filter(Boolean).length ? [sub, ...rest].filter(Boolean) : undefined, hours: flags.hours ? Number(flags.hours) : undefined, maxTickets: flags.max ? Number(flags.max) : undefined, mode: flags.auto ? "auto" : "run" });
     out(`plan started (${p.mode}) — spawning stops at ${new Date(p.spawnStopAt).toLocaleTimeString()}, max ${p.maxTickets === 1e9 ? "∞" : p.maxTickets} tickets. Now: factory wait`, p);
     break;
@@ -187,6 +210,7 @@ switch (cmd) {
     const t = flags.timeout === undefined ? 240 : typeof flags.timeout === "string" ? Number(flags.timeout) : NaN;
     if (!(t >= 1)) die("--timeout must be a number of seconds ≥ 1");
     const w = await currentWs();
+    if (!existsSync(cursorFile(w.id))) await markNow(w.id); // first wait: from now on, not the whole history
     const since = existsSync(cursorFile(w.id)) ? Number(readFileSync(cursorFile(w.id), "utf8")) : 0;
     const res = await api("GET", `/api/ws/${w.id}/wait?since=${flags.since ?? since}&timeout=${Math.min(t, 240)}`);
     writeFileSync(cursorFile(w.id), String(res.cursor));

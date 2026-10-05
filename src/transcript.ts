@@ -30,7 +30,7 @@ const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s
 const textOf = (c: unknown): string => (typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("\n") : "");
 const tag = (xml: string, name: string) => xml.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`))?.[1].trim() ?? "";
 const detailOf = (name: string, i: any) => {
-  const v = name === "Agent" || name === "Task" ? i?.description : i?.command ?? i?.file_path ?? i?.pattern ?? i?.path ?? i?.description ?? i?.url ?? i?.query ?? i?.name ?? "";
+  const v = name === "Agent" || name === "Task" ? i?.description : i?.command ?? i?.file_path ?? i?.pattern ?? i?.path ?? i?.description ?? i?.url ?? i?.query ?? i?.skill ?? i?.name ?? "";
   return String(v ?? "").split("\n")[0].slice(0, 140);
 };
 const jsonls = (dir: string) => (existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => join(dir, f)) : []);

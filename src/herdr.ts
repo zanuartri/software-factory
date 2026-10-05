@@ -24,11 +24,15 @@ export const prompt = (pane: string, text: string) => herdr("agent", "prompt", p
 export const interrupt = (pane: string) => herdr("agent", "send-keys", pane, "esc");
 
 /** New herdr workspace in `cwd` running claude (optionally `--resume <session>`); resolves to the claude session id once herdr reports it. */
-export async function startClaude(cwd: string, label: string, name: string, resume?: string) {
+/** Standing instruction for a manager session started from the web: who it is and which skill to load. Appended to Claude Code's system prompt. */
+export const managerBrief = (ws: { name: string; path: string }) =>
+  `You are the factory manager for the workspace "${ws.name}" (${ws.path}). The human chats with you in the factory web console. Load the \`manager\` skill (factory:manager) before acting on tickets, issues, workers or the board, and \`ticketing\` (factory:ticketing) before writing or rewriting a brief. Orient with \`factory status\`; if .factory/rules.md was never scanned, run /factory:init. You never edit the repo's source yourself: every code change is a ticket a worker executes.`;
+
+export async function startClaude(cwd: string, label: string, name: string, resume?: string, append?: string) {
   const r = await herdr("workspace", "create", "--cwd", cwd, "--label", label, "--no-focus");
   const pane: string = r.root_pane.pane_id;
   // A folder claude hasn't seen asks "trust this folder?", so `start` can fail as not-ready while the pane lives on; handled in the loop below.
-  const startErr = await herdr("agent", "start", name, "--kind", "claude", "--pane", pane, ...(resume ? ["--", "--resume", resume] : [])).then(() => null, (e: Error) => e);
+  const startErr = await herdr("agent", "start", name, "--kind", "claude", "--pane", pane, ...(resume || append ? ["--", ...(resume ? ["--resume", resume] : []), ...(append ? ["--append-system-prompt", append] : [])] : [])).then(() => null, (e: Error) => e);
   for (let i = 0; i < 60; i++) { // the session id shows up a moment after the agent is detected
     const a = (await listAgents()).find((x) => x.pane_id === pane);
     if (a?.agent_session?.value) return a.agent_session.value;
