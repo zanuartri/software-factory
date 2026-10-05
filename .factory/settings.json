@@ -2,7 +2,7 @@
   "base_branch": "main",
   "harnesses": {
     "claude": {
-      "enabled": true,
+      "enabled": false,
       "model": "claude-sonnet-5",
       "models": [
         "sonnet",
@@ -15,7 +15,7 @@
     },
     "omp": {
       "enabled": true,
-      "model": "anthropic/claude-sonnet-5-5",
+      "model": "openai-codex/gpt-6-luna",
       "models": [
         "anthropic/claude-sonnet-5-5",
         "anthropic/claude-opus-5-5",
@@ -36,8 +36,12 @@
       ]
     }
   },
-  "default_harness": "commandcode",
+  "default_harness": "omp",
   "max_workers": 5,
+  "reviewer": {
+    "harness": "omp",
+    "model": "anthropic/claude-sonnet-5-5"
+  },
   "reviewer_order": [
     "omp",
     "commandcode",
@@ -45,8 +49,8 @@
   ],
   "reviewer_models": {
     "claude": "claude-opus-5-5",
-    "omp": "openai-codex/gpt-6-sol",
-    "commandcode": "z-ai/glm-5.3-flashx"
+    "omp": "anthropic/claude-sonnet-5-5",
+    "commandcode": "xiaomi/mimo-v2.6-flash"
   },
   "verify_cmd": "bun install --frozen-lockfile && bun test src && bunx tsc -p . && cd ui && bun install --frozen-lockfile && bunx tsc -p . --noEmit && bun run build",
   "catalog": {
@@ -140,9 +144,5 @@
     "tickets": 10
   },
   "ask_timeout_min": 20,
-  "max_attempts": 3,
-  "reviewer": {
-    "harness": "auto",
-    "model": ""
-  }
+  "max_attempts": 3
 }

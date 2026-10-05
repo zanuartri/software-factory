@@ -1,18 +1,19 @@
 import { ArrowUp, Maximize2, Minimize2, PanelLeftClose, Play, Plus, RotateCw, Square, Wrench } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Workspace } from "./api";
+import { AskCard, type Answer, type Prompt } from "./ask";
 import { Select } from "./select";
 import { Btn, Dot, Md } from "./ui";
 
 type Msg = { id: string; role: "user" | "assistant" | "tool"; text: string };
-type Chat = { session: string | null; pane?: string | null; status: string; model?: string | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[] };
+type Chat = { session: string | null; pane?: string | null; status: string; model?: string | null; prompt?: Prompt | { raw: string } | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[] };
 type Cmd = { name: string; desc: string };
 
 const STATUS: Record<string, { label: string; color: string }> = {
   working: { label: "Working", color: "var(--warning)" },
   idle: { label: "Idle", color: "var(--success)" },
   done: { label: "Idle", color: "var(--success)" },
-  blocked: { label: "Needs input in herdr", color: "var(--danger)" },
+  blocked: { label: "Waiting for your answer", color: "var(--danger)" },
   unknown: { label: "Unknown", color: "var(--fg-subtle)" },
 };
 
@@ -69,13 +70,14 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   useEffect(() => { api<Cmd[]>(`${base}/commands`).then(setCmds).catch(() => {}); }, [base]);
   useEffect(() => { const el = input.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } }, [text]); // autosize
   useEffect(() => { setPending(null); }, [chat?.messages.length]);
-  useEffect(() => { const el = scroller.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [chat?.messages.length, pending]);
+  useEffect(() => { const el = scroller.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [chat?.messages.length, pending, !!chat?.prompt]);
 
   const act = async (fn: () => Promise<unknown>, ok?: string) => {
     setBusy(true);
     try { await fn(); if (ok) toast(ok); await load(); } catch (e: any) { toast(e.message); } finally { setBusy(false); }
   };
   const start = (resume: boolean) => act(() => api(`${base}/start`, { body: { resume } }), resume ? "Session resumed in herdr" : "New session started in herdr");
+  const answer = (a: Answer) => act(() => api(`${base}/answer`, { body: a }));
   const send = (raw = text) => {
     const t = raw.trim();
     if (!t || busy) return;
@@ -88,7 +90,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const pick = (c: Cmd) => { setText(`/${c.name} `); setSel(0); };
   const models = [...new Set([chat?.model, ...(ws.settings?.harnesses?.claude?.models ?? ["sonnet", "opus", "haiku"])].filter(Boolean) as string[])];
 
-  const st = chat?.status ?? "offline";
+  const st = chat?.prompt ? "blocked" : chat?.status ?? "offline"; // a question on screen wins over herdr's own (laggy) status
   const live = !!chat?.pane;
   const meta = STATUS[st];
   const msgs = chat?.messages ?? [];
@@ -129,6 +131,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
             ? <div key={m.id} className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble px-3.5 py-2 text-[13px] text-on-bubble">{m.text}</div>
             : <Md key={m.id} text={m.text} className="break-words" />)}
         {pending && <div className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble px-3.5 py-2 text-[13px] text-on-bubble opacity-60">{pending}</div>}
+        {chat?.prompt && <AskCard prompt={chat.prompt} send={answer} busy={busy} />}
         {live && st === "working" && <div className="flex items-center gap-1.5 text-[12px] text-fg-subtle"><Dot on pulse color="var(--warning)" />Thinking…</div>}
         </div>
       </div>
@@ -148,8 +151,8 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
                 ))}
               </div>
             )}
-            <textarea ref={input} value={text} onChange={(e) => { setText(e.target.value); setSel(0); setMenuOff(false); }} rows={1} disabled={!live} aria-label="message"
-              placeholder={live ? "Message the manager…  ( / for commands )" : "Start or resume a session to chat"}
+            <textarea ref={input} value={text} onChange={(e) => { setText(e.target.value); setSel(0); setMenuOff(false); }} rows={1} disabled={!live || !!chat?.prompt} aria-label="message"
+              placeholder={chat?.prompt ? "Answer the question above…" : live ? "Message the manager…  ( / for commands )" : "Start or resume a session to chat"}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return;
                 if (matches.length) {

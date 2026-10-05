@@ -54,8 +54,10 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       if (!w.manager) return json({ session: null, status: "none", messages: [] });
       const agent = await herdr.findAgent(w.manager).catch(() => null);
       const { msgs, model } = herdr.readChat(w.manager);
-      const usage = agent ? await herdr.readUsage(agent.pane_id) : null;
-      return json({ session: w.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, messages: msgs });
+      const screen = agent ? await herdr.readScreen(agent.pane_id) : "";
+      const usage = agent ? herdr.usageFrom(screen) : null;
+      const prompt = agent ? await herdr.promptFrom(agent.pane_id, screen, agent.agent_status === "blocked") : null;
+      return json({ session: w.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, prompt, messages: msgs });
     },
     POST: async (req) => {
       const w = sup.mustWs(req.params.ws), agent = w.manager ? await herdr.findAgent(w.manager) : null;
@@ -65,6 +67,15 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
     },
   },
   "/api/ws/:ws/chat/commands": { GET: ({ params }) => json(herdr.slashCommands(wsPath(params.ws))) },
+  /** Answer whatever the session is waiting on: { keys?, text?, enter? } — see herdr.answer. */
+  "/api/ws/:ws/chat/answer": {
+    POST: async (req) => {
+      const w = sup.mustWs(req.params.ws), agent = w.manager ? await herdr.findAgent(w.manager) : null;
+      if (!agent) throw new Error("manager session is not running in herdr");
+      await herdr.answer(agent.pane_id, await body(req));
+      return json({ ok: true });
+    },
+  },
   "/api/ws/:ws/chat/interrupt": {
     POST: async ({ params }) => {
       const w = sup.mustWs(params.ws), agent = w.manager ? await herdr.findAgent(w.manager) : null;

@@ -172,8 +172,8 @@ export function Settings({ ws, toast }: { ws: Workspace; toast: (m: string) => v
         {dirty && <Btn kind="ghost" onClick={() => setF(structuredClone(s.data))}>Discard</Btn>}
         <Btn kind="primary" disabled={!dirty} onClick={save}>Save changes</Btn>
       </PageHeader>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-16 md:px-6">
-        <div className="mx-auto max-w-3xl">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-16 md:px-4">
+        <div>
           <Group title="Harnesses">
             {HARNESSES.map((h) => {
               const c = f.harnesses[h];

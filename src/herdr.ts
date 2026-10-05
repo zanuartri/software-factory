@@ -122,9 +122,34 @@ export function slashCommands(cwd: string): SlashCmd[] {
 // ---- usage: Claude Code only hands context + rate limits to its statusline, so read them off the pane's rendered statusline
 export type Meter = { pct: number; reset?: string };
 export type Usage = { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null };
-export async function readUsage(pane: string): Promise<Usage> {
-  const t = String(await herdr("agent", "read", pane, "--source", "visible", "--lines", "20").catch(() => ""));
+/** One read of the pane's visible text serves usage and prompt detection. */
+export const readScreen = async (pane: string) => String(await herdr("agent", "read", pane, "--source", "visible", "--lines", "60").catch(() => ""));
+export function usageFrom(t: string): Usage {
   const meter = (label: string): Meter | null => { const m = t.match(new RegExp(`${label}\\s+(\\d+)%(?:\\s*↻(\\S+))?`)); return m ? { pct: +m[1], reset: m[2] } : null; };
   const c = t.match(/ctx\s+\S+\s+(\d+)%\s+(\S+)\/(\S+)/);
   return { ctx: c ? { pct: +c[1], used: c[2], size: c[3] } : null, h5: meter("5h"), d7: meter("7d") };
+}
+
+// ---- interactive prompts (AskUserQuestion, permission, plan approval…): read the screen, answer with key presses
+import { parsePrompt, type Prompt } from "./prompt";
+export type { Prompt };
+
+/** The question on screen, if any. herdr's own status isn't reliable for this (it can say "done" with a question up), so the screen decides;
+ *  `blocked` only buys a raw fallback for a dialog the parser doesn't know. */
+export async function promptFrom(pane: string, plain: string, blocked: boolean): Promise<Prompt | { raw: string } | null> {
+  const p = parsePrompt(plain);
+  if (!p) return blocked && plain.trim() ? { raw: plain } : null;
+  if (!p.tabs.length) return p;
+  const ansi = String(await herdr("agent", "read", pane, "--source", "visible", "--lines", "60", "--format", "ansi").catch(() => "")); // the active tab is only visible in colour
+  return parsePrompt(plain, ansi) ?? p;
+}
+
+const KEY = /^(esc|enter|tab|shift\+tab|up|down|left|right|space|backspace|ctrl\+g|[0-9a-z])$/i;
+export type Answer = { keys?: string[]; text?: string; enter?: boolean };
+/** Keys first (a number picks an option, ←/→ switch tabs, Tab amends), then literal text, then Enter — the same sequence a person types. */
+export async function answer(pane: string, a: Answer) {
+  const keys = (a.keys ?? []).filter((k) => KEY.test(k));
+  if (keys.length) await herdr("agent", "send-keys", pane, ...keys);
+  if (a.text) { if (keys.length) await Bun.sleep(250); await herdr("pane", "send-text", pane, a.text); }
+  if (a.enter) { if (a.text) await Bun.sleep(150); await herdr("agent", "send-keys", pane, "enter"); }
 }
