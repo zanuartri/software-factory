@@ -50,7 +50,8 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const wide = max ? "mx-auto w-full max-w-3xl" : "";
   const [chat, setChat] = useState<Chat | null>(null);
   const [text, setText] = useState("");
-  const [pending, setPending] = useState<{ text: string; imgs: string[] } | null>(null);
+  type Pending = { key: string; text: string; imgs: string[]; after: string | null };
+  const [pending, setPending] = useState<Pending[]>([]);
   type Att = { id: string; name: string; blob: string; path?: string };
   const [files, setFiles] = useState<Att[]>([]);
   const [drag, setDrag] = useState(false);
@@ -68,15 +69,26 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const load = useCallback(() => api<Chat>(base).then(setChat).catch(() => {}), [base]);
   // ponytail: polling; the transcript file has no push channel. Swap for fs.watch + the existing /live socket if 1.5s feels slow.
   useEffect(() => {
-    setChat(null); setPending(null); load();
+    setChat(null); setPending([]); load();
     const t = setInterval(() => { if (!document.hidden) load(); }, 1500);
     return () => clearInterval(t);
   }, [load, ws.manager]);
   useEffect(() => { api<Cmd[]>(`${base}/commands`).then(setCmds).catch(() => {}); }, [base]);
   useEffect(() => { const el = input.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } }, [text]); // autosize
-  useEffect(() => { setPending(null); }, [chat?.messages.length, chat?.queued?.length]);
-  useEffect(() => { const el = scroller.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [chat?.messages.length, pending, !!chat?.prompt]);
-  useEffect(() => { const el = scroller.current; if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80); }, [chat?.messages.length, pending, !!chat?.prompt]);
+  useEffect(() => {
+    const users = (chat?.messages ?? []).filter((m) => m.role === "user");
+    const queued = chat?.queued ?? [];
+    setPending((ps) => {
+      const next = ps.filter((p) => {
+        if (queued.includes(p.text)) return false;
+        const i = p.after ? users.findIndex((m) => m.id === p.after) : -1;
+        return !(i >= 0 ? users.slice(i + 1) : users).some((m) => m.text === p.text);
+      });
+      return next.length === ps.length ? ps : next;
+    });
+  }, [chat]);
+  useEffect(() => { const el = scroller.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [chat?.messages.at(-1)?.id, pending.length, !!chat?.prompt]);
+  useEffect(() => { const el = scroller.current; if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80); }, [chat?.messages.at(-1)?.id, pending.length, !!chat?.prompt]);
 
   const act = async (fn: () => Promise<unknown>, ok?: string) => {
     setBusy(true);
@@ -103,8 +115,9 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
     const typed = raw.trim(), atts = raw === text ? files : [];
     if ((!typed && !atts.length) || busy || atts.some((f) => !f.path)) return;
     const t = [typed || "Please look at the attached image" + (atts.length > 1 ? "s." : "."), ...atts.map((f) => mention(f.path!))].join("\n");
-    setText(""); setFiles([]); setPending({ text: typed, imgs: atts.map((f) => f.blob) }); stick.current = true;
-    api(base, { body: { text: t, interrupt } }).then(load).catch((e) => { setPending(null); setText(typed); setFiles(atts); toast(e.message); });
+    const key = crypto.randomUUID(), after = (chat?.messages ?? []).filter((m) => m.role === "user").at(-1)?.id ?? null;
+    setText(""); setFiles([]); setPending((ps) => [...ps, { key, text: t, imgs: atts.map((f) => f.blob), after }]); stick.current = true;
+    api(base, { body: { text: t, interrupt } }).then(load).catch((e) => { setPending((ps) => ps.filter((p) => p.key !== key)); setText(typed); setFiles(atts); toast(e.message); });
   };
   // "/" + word (no space yet) opens the command menu
   const q = /^\/\S*$/.test(text) && !menuOff ? text.slice(1).toLowerCase() : null;
@@ -159,7 +172,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
             ? <div key={m.id} className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble px-3.5 py-2 text-[13px] text-on-bubble">{m.text}</div>
             : <Md key={m.id} text={m.text} className="break-words" />)}
         {(chat?.queued ?? []).map((q, i) => <UserBubble key={`q${i}`} text={q} queued />)}
-        {pending && <UserBubble text={pending.text} local={pending.imgs} queued={st === "working"} />}
+        {pending.map((p) => <UserBubble key={p.key} text={p.text} local={p.imgs} queued={st === "working"} />)}
         {chat?.prompt && <AskCard prompt={chat.prompt} send={answer} busy={busy} />}
         {live && !chat?.prompt && (st === "working" || (activity?.background ?? 0) > 0) && (
           <div className="flex min-w-0 items-center gap-1.5 text-[12px] text-fg-subtle">
