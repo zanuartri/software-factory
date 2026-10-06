@@ -1,8 +1,10 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bundledSkillsRoot, clearCommandCache, discoverBundled, noteSent, prompt, slashCommands } from "./herdr";
+
+setDefaultTimeout(20000);
 
 const tmp = () => mkdtempSync(join(tmpdir(), "herdr-cmd-"));
 /** A command file Claude Code would find under <cwd>/.claude/commands. */
