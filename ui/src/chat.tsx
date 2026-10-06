@@ -1,4 +1,4 @@
-import { ArrowUp, Maximize2, Minimize2, PanelLeftClose, Paperclip, Play, Plus, RotateCw, Square, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Maximize2, Minimize2, PanelLeftClose, Paperclip, Play, Plus, RotateCw, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Workspace } from "./api";
 import { AnswerLog, AskCard, type Answer, type Prompt } from "./ask";
@@ -62,6 +62,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const input = useRef<HTMLTextAreaElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
   const base = `/api/ws/${ws.id}/chat`;
 
   const load = useCallback(() => api<Chat>(base).then(setChat).catch(() => {}), [base]);
@@ -75,6 +76,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   useEffect(() => { const el = input.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } }, [text]); // autosize
   useEffect(() => { setPending(null); }, [chat?.messages.length, chat?.queued?.length]);
   useEffect(() => { const el = scroller.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [chat?.messages.length, pending, !!chat?.prompt]);
+  useEffect(() => { const el = scroller.current; if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80); }, [chat?.messages.length, pending, !!chat?.prompt]);
 
   const act = async (fn: () => Promise<unknown>, ok?: string) => {
     setBusy(true);
@@ -133,7 +135,8 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
         <Btn kind="ghost" size="icon" title="Collapse chat" onClick={onMinimize}><PanelLeftClose className="size-4" /></Btn>
       </div>
 
-      <div ref={scroller} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <div className="relative min-h-0 flex-1">
+      <div ref={scroller} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setAtBottom(stick.current); }} className="h-full overflow-y-auto px-3 py-3">
         <div className={`flex min-h-full flex-col justify-end gap-3 ${wide}`}>
         {chat && !live && !msgs.length && (
           <div className="grid flex-1 place-items-center text-center">
@@ -166,6 +169,13 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
           </div>
         )}
         </div>
+      </div>
+      {!atBottom && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+          <button type="button" aria-label="Scroll to latest" title="Jump to latest" onClick={() => { const el = scroller.current; if (!el) return; stick.current = true; el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }); }}
+            className="fade-up pointer-events-auto z-[5] grid size-7 place-items-center rounded-full border border-border bg-surface text-fg-muted shadow-[var(--shadow-lg)] transition-colors hover:bg-hover hover:text-fg"><ArrowDown className="size-4" /></button>
+        </div>
+      )}
       </div>
 
       <div className="shrink-0 px-3 pt-1 pb-3">
