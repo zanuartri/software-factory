@@ -10,12 +10,16 @@ Trust comes from structure, not hope (ideas from cursor/plugins `pstack`):
 |---|---|
 | The brief is the product — a ticket missing GOAL/ACCEPTANCE/VERIFY/SCOPE can't be released | `store.ts validateBrief` |
 | Standing orders pasted verbatim into every worker | `.factory/rules.md` → `prompts.ts` |
-| Worker can't skip the gate: daemon re-runs VERIFY itself + checks diff stays in scope | `supervisor.ts gate()` |
+| Worker can't skip the gate: daemon re-runs VERIFY itself + re-runs VERIFY itself; files outside scope_paths go to the reviewer, not to a hard fail | `supervisor.ts gate()` |
 | Verifier from a different model family than the implementer | `supervisor.ts pickReviewer()` |
 | Decision log per run (what / why / evidence / result) | `~/.factory/runs/.../decisions.tsv` |
 | Never block on the human: questions carry options + default + timeout | `factory_ask` |
 | Encode lessons in structure: `reflect` proposes new rules lines | `/factory:reflect` in manager skill |
 | One writer per worktree, scope overlap never scheduled in parallel | `supervisor.ts schedule()` |
+
+## Skills and personas
+
+`plugin/skills`: `manager` (the Claude session), `ticketing` (brief craft), `worker` and `reviewer` (injected into runs), and `persona-*` (bug, feature, ui, refactor, test, research), which `prompts.ts` appends to a worker prompt by ticket tag or title. Guardrails stay few: the platform trusts agents and relies on the gate plus review.
 
 ## Layout
 
@@ -28,7 +32,7 @@ src/            daemon + CLI (Bun, zero server deps: Bun.serve + bun:sqlite)
   adapters.ts   HarnessAdapter for claude | omp | commandcode
   supervisor.ts scheduling, spawn, steer/abort, gate (scope + verify + cross-family review), merge
   mcp.ts        minimal MCP (streamable HTTP, JSON responses) — worker tools
-  guard.ts      shared policy: writes stay in worktree+scope, no push/force/secret reads
+  guard.ts      shared policy: few real walls (worktree, no push/force/secrets/daemon API); scope_paths is advisory
   prompts.ts    worker / reviewer prompts
   cli.ts        `factory` CLI used by the manager + humans
 harness/        omp extension (bridge to daemon + guard)
@@ -43,7 +47,7 @@ ui/             React + Vite + Tailwind ops console
 - `/factory:plan` writes drafts. `/factory:release` validates the brief and moves to open.
 - `/factory:run` (and `auto`) schedules open tickets: deps done/in_review, no `scope_paths` overlap with running, free slot.
 - Worker loop inside the harness: planner → implementer (small commits) → tester → self-review, then `factory_submit`.
-- Daemon gate on submit: diff ⊆ scope_paths, VERIFY commands pass (evidence saved), cross-family reviewer PASS.
+- Daemon gate on submit: committed + clean tree, VERIFY commands pass (evidence saved), cross-family reviewer PASS. Files outside `scope_paths` are shown to the reviewer to judge (advisory, not a failure).
   Fail → findings sent back to the worker (max 3 attempts) → `failed`.
 - `/factory:review`: auto-merge when green — merge base into the branch (worker resolves conflicts), re-verify, squash, CAS update of base, full-suite verify on base, auto-revert on red.
 
