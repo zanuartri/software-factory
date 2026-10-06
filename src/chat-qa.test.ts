@@ -104,6 +104,16 @@ test("messages typed while Claude is busy stay queued until delivered; delivered
   expect(r.msgs.map((m) => [m.role, m.text])).toEqual([["user", "first"]]);
 });
 
+test("a skill/plugin slash command shows as a user bubble; its skill expansion stays hidden", () => {
+  write("s10", [
+    note("k1", "<command-message>factory:run</command-message>\n<command-name>/factory:run</command-name>"),
+    note("k2", "<command-message>factory:plan</command-message>\n<command-name>/factory:plan</command-name>\n<command-args>x y</command-args>"),
+    note("k3", "<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>"),
+    { type: "user", uuid: "k4", isMeta: true, message: { role: "user", content: "Base directory for this skill: /tmp/plan\n\nARGUMENTS: x y" } },
+  ]);
+  expect(readChat("s10").msgs.map((m) => [m.role, m.text])).toEqual([["user", "/factory:run"], ["user", "/factory:plan x y"], ["user", "/clear"]]);
+});
+
 test("a pasted image is counted on the user message", () => {
   write("s9", [{ type: "user", uuid: "u1", message: { role: "user", content: [{ type: "text", text: "what is this" }, { type: "image", source: { type: "base64", data: "AAAA" } }] } }]);
   expect(readChat("s9").msgs[0]).toMatchObject({ role: "user", text: "what is this", images: 1 });
