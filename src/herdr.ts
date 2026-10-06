@@ -107,6 +107,21 @@ export function noteSent(text: string) {
 }
 /** Swappable so a test can count evaluations; the discovery runs only on a cache miss. */
 export const discoverBundled = { get: bundledSkillsRoot };
+function liveRootFor(key: string, marketplaces: Map<string, unknown>): string | null {
+  const marketplace = marketplaces.get(key.split("@")[1]);
+  if (!marketplace || typeof marketplace !== "object" || !("source" in marketplace) || !marketplace.source ||
+    typeof marketplace.source !== "object" || !("source" in marketplace.source) || marketplace.source.source !== "directory" ||
+    !("installLocation" in marketplace) || typeof marketplace.installLocation !== "string") return null;
+  try {
+    const manifest: unknown = JSON.parse(readFileSync(join(marketplace.installLocation, ".claude-plugin", "marketplace.json"), "utf8"));
+    if (!manifest || typeof manifest !== "object" || !("plugins" in manifest) || !Array.isArray(manifest.plugins)) return null;
+    const plugin = manifest.plugins.find((item) => item && typeof item === "object" && "name" in item && item.name === key.split("@")[0]);
+    if (!plugin || typeof plugin !== "object" || !("source" in plugin) || typeof plugin.source !== "string" || !plugin.source.startsWith("./")) return null;
+    const live = join(marketplace.installLocation, plugin.source);
+    return existsSync(live) ? live : null;
+  } catch { return null; }
+}
+
 export function slashCommands(cwd: string, bundled?: string | null, home = join(homedir(), ".claude")): SlashCmd[] {
   const hit = cmdCache.get(cwd);
   if (hit && Date.now() - hit.at < 30e3) return hit.cmds;
@@ -124,20 +139,9 @@ export function slashCommands(cwd: string, bundled?: string | null, home = join(
     if (!pluginData || typeof pluginData !== "object" || !("plugins" in pluginData) || !pluginData.plugins || typeof pluginData.plugins !== "object") throw new Error("Invalid installed plugins");
     for (const [key, value] of Object.entries(pluginData.plugins)) if (Array.isArray(value)) for (const i of value) {
       if (!i || typeof i !== "object" || !("installPath" in i) || typeof i.installPath !== "string") continue;
-      const [name, marketplace] = key.split("@");
-      const source = marketplaces.get(marketplace);
-      if (source && typeof source === "object" && "source" in source && source.source && typeof source.source === "object" && "source" in source.source && source.source.source === "directory" && "installLocation" in source && typeof source.installLocation === "string") {
-        try {
-          const manifest: unknown = JSON.parse(readFileSync(join(source.installLocation, ".claude-plugin", "marketplace.json"), "utf8"));
-          if (manifest && typeof manifest === "object" && "plugins" in manifest && Array.isArray(manifest.plugins)) {
-            const plugin = manifest.plugins.find((p) => p && typeof p === "object" && "name" in p && p.name === name);
-            if (plugin && typeof plugin === "object" && "source" in plugin && typeof plugin.source === "string" && plugin.source.startsWith("./")) {
-              const live = join(source.installLocation, plugin.source);
-              if (existsSync(live)) scan(live, `${name}:`, out);
-            }
-          }
-        } catch {}
-      }
+      const name = key.split("@")[0];
+      const live = liveRootFor(key, marketplaces);
+      if (live) scan(live, `${name}:`, out);
       if (existsSync(i.installPath)) scan(i.installPath, `${name}:`, out);
     }
   } catch {}

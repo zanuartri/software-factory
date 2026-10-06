@@ -24,14 +24,12 @@ function pluginFixture(home: string, marketplace: string, source: unknown, live 
   writeFileSync(join(claude, "plugins", "installed_plugins.json"), JSON.stringify({ plugins: { "factory@market": [{ installPath: install }] } }));
   mkdirSync(join(claude, "plugins"), { recursive: true });
   writeFileSync(join(claude, "plugins", "known_marketplaces.json"), JSON.stringify({ market: { source: { source: marketplace, path: home }, installLocation: home } }));
-  if (marketplace === "directory") {
-    mkdirSync(join(home, ".claude-plugin"), { recursive: true });
-    writeFileSync(join(home, ".claude-plugin", "marketplace.json"), JSON.stringify({ plugins: [{ name: "factory", source }] }));
-    if (live) {
-      mkdirSync(join(livePlugin, "commands"), { recursive: true });
-      writeFileSync(join(livePlugin, "commands", "new.md"), "---\ndescription: live new command\n---\n");
-      writeFileSync(join(livePlugin, "commands", "clash.md"), "---\ndescription: live description\n---\n");
-    }
+  mkdirSync(join(home, ".claude-plugin"), { recursive: true });
+  writeFileSync(join(home, ".claude-plugin", "marketplace.json"), JSON.stringify({ plugins: [{ name: "factory", source }] }));
+  if (live) {
+    mkdirSync(join(livePlugin, "commands"), { recursive: true });
+    writeFileSync(join(livePlugin, "commands", "new.md"), "---\ndescription: live new command\n---\n");
+    writeFileSync(join(livePlugin, "commands", "clash.md"), "---\ndescription: live description\n---\n");
   }
   return { claude, install, livePlugin };
 }
