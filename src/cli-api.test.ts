@@ -147,7 +147,9 @@ function fakeHerdr() {
     `else if (cmd === "agent" && sub === "list") {`,
     `  if (process.env.FAKE_HERDR === "fail") { console.error("herdr: daemon not running"); process.exit(1); }`,
     `  const st = existsSync(status) ? readFileSync(status, "utf8").trim() : "done";`,
-    `  const agents = existsSync(marker) ? [{ pane_id: "fake-pane", name: "", agent: "claude", agent_status: st, cwd: "", agent_session: { value: "s1" } }] : [];`,
+    `  const name = existsSync(join(import.meta.dir, "name.txt")) ? readFileSync(join(import.meta.dir, "name.txt"), "utf8") : "";`,
+    `  const calls = join(import.meta.dir, "list-calls.txt"); writeFileSync(calls, String(Number(existsSync(calls) ? readFileSync(calls, "utf8") : 0) + 1));`,
+    `  const agents = existsSync(marker) ? [{ pane_id: "fake-pane", name, agent: "claude", agent_status: st, cwd: "", agent_session: { value: "s1" } }] : [];`,
     `  console.log(JSON.stringify({ result: { agents } }));`,
     `}`,
     `else if (cmd === "agent" && sub === "read") console.log(process.argv.includes("--format") ? "❯ \\x1b[0m\\x1b[2mSuggested next prompt\\x1b[0m" : "❯ Suggested next prompt");`,
@@ -185,6 +187,42 @@ async function registerRepo(post: (path: string, body: unknown) => Promise<Respo
   expect(Bun.spawnSync(["git", "init", "-q"], { cwd: repo, stdout: "ignore", stderr: "ignore", windowsHide: true }).exitCode).toBe(0);
   return (await (await post("/api/workspaces", { path: repo })).json()) as { id: string };
 }
+test("GET workspaces reports pane status from one herdr list and degrades failures to null", async () => {
+  const d = await daemonWithFakeHerdr({});
+  try {
+    const w = await registerRepo(d.post);
+    const countFile = join(d.fake.dir, "list-calls.txt");
+    writeFileSync(countFile, "0");
+    const empty = await d.get("/api/workspaces");
+    expect(empty.status).toBe(200);
+    expect((await empty.json() as { id: string; manager_status: string | null }[]).find((x) => x.id === w.id)?.manager_status).toBeNull();
+    expect(readFileSync(countFile, "utf8")).toBe("1");
+
+    writeFileSync(d.fake.marker, "1"); // simulate a manager pane appearing after the initial empty list
+    await d.post(`/api/ws/${w.id}/attach`, { session: "s1", force: true });
+    writeFileSync(join(d.fake.dir, "status.txt"), "working");
+    writeFileSync(countFile, "0");
+    const bySession = await d.get("/api/workspaces");
+    expect((await bySession.json() as { id: string; manager_status: string | null }[]).find((x) => x.id === w.id)?.manager_status).toBe("working");
+    expect(readFileSync(countFile, "utf8")).toBe("1");
+
+    writeFileSync(join(d.fake.dir, "name.txt"), `factory-${w.id}`);
+    await d.post(`/api/ws/${w.id}/attach`, { session: "other", force: true });
+    writeFileSync(join(d.fake.dir, "status.txt"), "blocked");
+    const byName = await d.get("/api/workspaces");
+    expect((await byName.json() as { id: string; manager_status: string | null }[]).find((x) => x.id === w.id)?.manager_status).toBe("blocked");
+  } finally { await d.stop(); }
+}, 30000);
+
+test("GET workspaces returns null manager status when herdr is unavailable", async () => {
+  const d = await daemonWithFakeHerdr({ FAKE_HERDR: "fail" });
+  try {
+    const w = await registerRepo(d.post);
+    const res = await d.get("/api/workspaces");
+    expect(res.status).toBe(200);
+    expect((await res.json() as { id: string; manager_status: string | null }[]).find((x) => x.id === w.id)?.manager_status).toBeNull();
+  } finally { await d.stop(); }
+}, 30000);
 
 test("a failing herdr is not 'no agent': GET chat 503s and chat/start aborts before startClaude", async () => {
   const d = await daemonWithFakeHerdr({ FAKE_HERDR: "fail" });

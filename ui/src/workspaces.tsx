@@ -4,7 +4,6 @@ import { api, type Workspace } from "./api";
 import { Btn, Dot, inputCls, PageHeader, STATUS_META, StatusIcon } from "./ui";
 
 const COUNT_ORDER = ["draft", "open", "in_progress", "in_review", "done"] as const;
-const MANAGER_LIVE_MS = 10 * 60e3; // same window the daemon uses to call a manager "live"
 
 function Card({ w, open, remove }: { w: Workspace; open: () => void; remove: () => void }) {
   const [menu, setMenu] = useState(false);
@@ -18,7 +17,8 @@ function Card({ w, open, remove }: { w: Workspace; open: () => void; remove: () 
     return () => { removeEventListener("pointerdown", down); removeEventListener("keydown", key); };
   }, [menu]);
   const live = !!w.plan?.active;
-  const mgr = !!w.manager && Date.now() - (w.manager_seen ?? 0) < MANAGER_LIVE_MS;
+  const status = w.manager_status ?? null;
+  const mgr = status !== null;
   const base = w.settings?.base_branch;
   const chips = COUNT_ORDER.filter((s) => w.counts?.[s]);
   return (
@@ -31,7 +31,7 @@ function Card({ w, open, remove }: { w: Workspace; open: () => void; remove: () 
       <p className="mt-3 truncate font-mono text-[12px] text-fg-muted" title={w.path}>{w.path}</p>
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-fg-subtle">
         {base && <span title="Base branch">branch <span className="font-mono text-fg-muted">{base}</span></span>}
-        <span className="flex items-center gap-1.5" title={mgr ? "Manager session attached" : "No live manager session"}><Dot on={mgr} />{mgr ? "Manager live" : "No manager"}</span>
+        <span className="flex items-center gap-1.5" title={mgr ? "Manager session attached" : "No live manager session"}><Dot on={mgr} />{mgr ? `Manager${["working", "blocked"].includes(status) ? ` ${status}` : " live"}` : "No manager"}</span>
       </div>
       <div className="mt-3 flex min-h-5 flex-wrap gap-1.5">
         {chips.map((s) => (
@@ -86,6 +86,10 @@ function AddCard({ add, toast }: { add: (path: string) => Promise<void>; toast: 
 }
 
 export function Workspaces({ list, reload, open, toast }: { list: Workspace[]; reload: () => void; open: (id: string) => void; toast: (m: string) => void }) {
+  useEffect(() => {
+    const timer = setInterval(reload, 15000);
+    return () => clearInterval(timer);
+  }, [reload]);
   const add = async (path: string) => {
     const w = await api<Workspace>("/api/workspaces", { body: { path } });
     reload(); toast(`Added ${w.name}`); open(w.id);

@@ -60,7 +60,16 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   "/api/shutdown": { POST: () => { sup.shutdownAll(); setTimeout(() => process.exit(0), 300); return json({ ok: true }); } },
 
   "/api/workspaces": {
-    GET: () => json(sup.listWorkspaces().map((w) => ({ ...w, settings: store.loadSettings(w.path), plan: sup.planState(w.id), counts: ticketCounts(w.path) }))),
+    GET: async () => {
+      let agents: herdr.HerdrAgent[] = [];
+      try { agents = await herdr.listAgents(); } catch { /* herdr unavailable: keep every workspace manager status null */ }
+      return json(sup.listWorkspaces().map((w) => {
+        const name = herdr.agentName(w.id);
+        const agent = agents.find((a) => a.agent === "claude" && w.manager && a.agent_session?.value === w.manager)
+          ?? agents.find((a) => a.agent === "claude" && a.name === name);
+        return { ...w, manager_status: agent?.agent_status ?? null, settings: store.loadSettings(w.path), plan: sup.planState(w.id), counts: ticketCounts(w.path) };
+      }));
+    },
     POST: async (req) => { const { path } = await body(req); const w = sup.registerWorkspace(path); watchWs(w.id, w.path); return json(w); },
   },
   "/api/workspaces/:id": {

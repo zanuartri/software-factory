@@ -21,7 +21,7 @@ export type Ask = { id: number; ws: string; ticket: string; run: string; questio
 export type Issue = { id: string; title: string; status: string; kind: string; tags: string[]; tickets: string[]; body: string; reason?: string | null; created: string };
 export type Models = Record<Harness, { id: string; hint?: string }[]>;
 export type ReviewerPick = { harness: Harness | "auto"; model: string };
-export type Workspace = { id: string; name: string; path: string; manager: string | null; manager_seen: number | null; settings: any; plan: any; counts?: Record<string, number> };
+export type Workspace = { id: string; name: string; path: string; manager: string | null; manager_seen: number | null; manager_status?: string | null; settings: any; plan: any; counts?: Record<string, number> };
 
 export async function api<T = any>(path: string, init?: { method?: string; body?: unknown; text?: boolean; timeout?: number }): Promise<T> {
   const method = init?.method ?? (init?.body !== undefined ? "POST" : "GET");
