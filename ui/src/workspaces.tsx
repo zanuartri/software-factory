@@ -85,10 +85,10 @@ function AddCard({ add, toast }: { add: (path: string) => Promise<void>; toast: 
   );
 }
 
-export function Workspaces({ list, reload, open, toast }: { list: Workspace[]; reload: () => void; open: (id: string, view: "floor" | "board") => void; toast: (m: string) => void }) {
+export function Workspaces({ list, reload, open, toast }: { list: Workspace[]; reload: () => void; open: (id: string) => void; toast: (m: string) => void }) {
   const add = async (path: string) => {
     const w = await api<Workspace>("/api/workspaces", { body: { path } });
-    reload(); toast(`Added ${w.name}`); open(w.id, "board");
+    reload(); toast(`Added ${w.name}`); open(w.id);
   };
   const remove = (w: Workspace) => {
     if (!confirm(`Remove workspace ${w.name}? The repo on disk is not touched.`)) return;
@@ -97,9 +97,9 @@ export function Workspaces({ list, reload, open, toast }: { list: Workspace[]; r
   return (
     <>
       <PageHeader title="Workspaces" sub={`${list.length} registered`} />
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:p-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {list.map((w) => <Card key={w.id} w={w} open={() => open(w.id, "floor")} remove={() => remove(w)} />)}
+      <div className="min-h-0 flex-1 overflow-y-auto py-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {list.map((w) => <Card key={w.id} w={w} open={() => open(w.id)} remove={() => remove(w)} />)}
           <AddCard add={add} toast={toast} />
         </div>
       </div>

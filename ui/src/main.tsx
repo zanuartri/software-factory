@@ -19,16 +19,15 @@ const VIEWS = [
   { id: "issues", label: "Issues", icon: CircleDot },
   { id: "rules", label: "Rules", icon: ScrollText },
   { id: "settings", label: "Settings", icon: Settings2 },
-  { id: "workspaces", label: "Workspaces", icon: FolderGit2 },
 ] as const;
 type View = (typeof VIEWS)[number]["id"];
 
 /** #/<ws>/<view>[/<ticket>] */
 function useRoute() {
-  const parse = () => { const [ws, view, ticket] = location.hash.replace(/^#\/?/, "").split("/"); return { ws: ws || null, view: (view || "board") as View, ticket: ticket || null }; };
+  const parse = () => { const [ws, view, ticket] = location.hash.replace(/^#\/?/, "").split("/"); return { ws: view === "workspaces" ? null : ws || null, view: (view === "workspaces" ? "board" : view || "board") as View, ticket: view === "workspaces" ? null : ticket || null }; };
   const [r, setR] = useState(parse);
   useEffect(() => { const f = () => setR(parse()); addEventListener("hashchange", f); return () => removeEventListener("hashchange", f); }, []);
-  const go = (p: Partial<typeof r>) => { const n = { ...r, ...p }; location.hash = `/${n.ws ?? ""}/${n.view}${n.ticket ? "/" + n.ticket : ""}`; };
+  const go = (p: Partial<typeof r>) => { const n = { ...r, ...p }; location.hash = n.ws ? `/${n.ws}/${n.view}${n.ticket ? "/" + n.ticket : ""}` : "/"; };
   return [r, go] as const;
 }
 
@@ -37,7 +36,7 @@ function useTabIdentity(ws: Workspace | undefined, view: string) {
   const label = VIEWS.find((v) => v.id === view)?.label ?? "";
   const active = !!ws?.plan?.active;
   useEffect(() => {
-    document.title = ws ? `${ws.name} · ${label}` : "Factory";
+    document.title = ws ? `${ws.name} · ${label}` : "Factory · Workspaces";
     const hue = [...(ws?.id ?? "factory")].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7); // stable per workspace
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="hsl(${hue} 42% 40%)"/><text x="16" y="23" text-anchor="middle" font-family="system-ui,sans-serif" font-size="19" font-weight="700" fill="white">${((ws?.name ?? "F")[0] ?? "F").toUpperCase().replace(/[<>&]/g, "")}</text>${active ? '<circle cx="25" cy="7" r="6" fill="#a78bfa" stroke="white" stroke-width="2"/>' : ""}</svg>`;
     let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
@@ -63,10 +62,29 @@ function App() {
   };
   const clear = useCallback(() => setToast(null), []);
   const connected = useConnected();
-  const ws = wss.data?.find((w) => w.id === route.ws) ?? wss.data?.[0];
+  const ws = route.ws ? wss.data?.find((w) => w.id === route.ws) : undefined;
   const openTicket = (ticket: string) => go({ ws: ws?.id, ticket });
-  useTabIdentity(ws, route.view);
+  useTabIdentity(ws, route.ws ? route.view : "workspaces");
 
+  if (!ws) return (
+    <div className="flex h-full flex-col bg-bg">
+      <header className="flex h-13 shrink-0 items-center gap-3 border-b border-border px-4">
+        <span className="text-[14px] font-semibold">Factory</span>
+        <div className="ml-auto flex items-center gap-2">
+          <span title={connected ? "Connected to the daemon" : "Reconnecting…"} className="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[12px] text-fg-muted">
+            <Dot on={connected} pulse={!connected} /><span className="hidden sm:inline">{connected ? "Live" : "Offline"}</span>
+          </span>
+          <ThemeToggle />
+        </div>
+      </header>
+      <main className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+        <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col">
+          <Workspaces list={wss.data ?? []} reload={wss.reload} toast={setToast} open={(id) => go({ ws: id, view: "board", ticket: null })} />
+        </div>
+      </main>
+      <Toast msg={toast} onDone={clear} />
+    </div>
+  );
   return (
     <div className="flex h-full flex-col">
       <nav className="flex h-13 shrink-0 items-center gap-3 border-b border-border bg-bg px-3" aria-label="main">
@@ -78,6 +96,9 @@ function App() {
               <span className="hidden truncate text-[13px] font-semibold sm:block">{ws?.name ?? "Factory"}</span>
             </span>
           )} />
+        <button onClick={() => go({ ws: null, ticket: null })} title="All workspaces" aria-label="All workspaces" className="grid size-8 shrink-0 place-items-center rounded-lg text-fg-muted transition-colors hover:bg-hover hover:text-fg">
+          <FolderGit2 className="size-4" strokeWidth={1.75} />
+        </button>
 
         {/* work views, then a divider, then configuration */}
         <div className="flex min-w-0 items-center overflow-x-auto rounded-full bg-muted p-0.5">
@@ -136,7 +157,6 @@ function App() {
               </div>
             </div>
           ) : !ws && !wss.data ? <div className="grid h-full place-items-center text-[13px] text-fg-muted" role="status">Loading…</div>
-            : !ws || route.view === "workspaces" ? <Workspaces list={wss.data ?? []} reload={wss.reload} toast={setToast} open={(id, view) => go({ ws: id, view, ticket: null })} />
             : route.view === "floor" ? <Floor key={ws.id} ws={ws} openTicket={openTicket} openBoard={() => go({ view: "board", ticket: null })} toast={setToast} />
             : route.view === "board" ? <Board key={ws.id} ws={ws} openTicket={openTicket} toast={setToast} />
             : route.view === "issues" ? <Issues key={ws.id} ws={ws} openTicket={openTicket} toast={setToast} />
