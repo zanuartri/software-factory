@@ -159,7 +159,12 @@ export function readChat(session: string, limit = 300): Read {
       const texts = blocks ? blocks.filter((t) => !INJECTED.test(t.trim()) || ROUTE.test(t.trim())) : [textOf(content)];
       const raw = texts.filter((t) => t.trim()).join("\n");
       const images = Array.isArray(content) ? content.filter((b: any) => b.type === "image").length : 0;
-      for (const t of texts) if (t.trim()) note(t, e.uuid, e.isMeta);
+      let n = 0; // rows already emitted for this entry: 2nd+ get a unique id so React keys don't collide
+      for (const t of texts) if (t.trim()) {
+        const before = msgs.length;
+        note(t.trim(), n ? `${e.uuid}:${n}` : e.uuid, e.isMeta);
+        if (msgs.length > before) n++;
+      }
       if (images) { const m = msgs.at(-1); if (raw && m && m.id === e.uuid) m.images = images; else msgs.push({ id: `${e.uuid}:img`, role: "user", text: "", images }); }
     } else if (e.type === "assistant" && Array.isArray(e.message.content)) {
       if (e.message.model && e.message.model !== "<synthetic>") model = e.message.model;

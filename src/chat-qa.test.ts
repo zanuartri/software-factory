@@ -172,6 +172,19 @@ test("a !-bash user command shows as a user bubble; its ANSI-stripped output bec
   ]);
 });
 
+test("a kept block with leading whitespace still routes as its own row, not raw XML", () => {
+  write("s20", [{ type: "user", uuid: "w1", message: { role: "user", content: [{ type: "text", text: " \n<bash-input>ls</bash-input>" }] } }]);
+  expect(readChat("s20").msgs.map((m) => [m.role, m.text])).toEqual([["user", "!ls"]]);
+});
+
+test("an entry with two kept text blocks yields distinct row ids; the first row keeps the entry uuid", () => {
+  write("s21", [{ type: "user", uuid: "u1", message: { role: "user", content: [{ type: "text", text: "one" }, { type: "text", text: "two" }] } }]);
+  const m = readChat("s21").msgs;
+  expect(m.map((x) => x.text)).toEqual(["one", "two"]);
+  expect(m[0].id).toBe("u1");
+  expect(m[1].id).not.toBe(m[0].id);
+});
+
 test("a <pasted_content> user entry unwraps to the inner text", () => {
   write("s17", [note("p1", '<pasted_content lines="2">hello\nworld</pasted_content>')]);
   expect(readChat("s17").msgs.map((m) => [m.role, m.text])).toEqual([["user", "hello\nworld"]]);

@@ -23,16 +23,23 @@ export type Models = Record<Harness, { id: string; hint?: string }[]>;
 export type ReviewerPick = { harness: Harness | "auto"; model: string };
 export type Workspace = { id: string; name: string; path: string; manager: string | null; manager_seen: number | null; settings: any; plan: any; counts?: Record<string, number> };
 
-export async function api<T = any>(path: string, init?: { method?: string; body?: unknown; text?: boolean }): Promise<T> {
-  const res = await fetch(path, {
-    method: init?.method ?? (init?.body !== undefined ? "POST" : "GET"),
-    headers: { "content-type": "application/json" },
-    body: init?.body === undefined ? undefined : typeof init.body === "string" ? init.body : JSON.stringify(init.body),
-  });
-  if (init?.text) return (await res.text()) as T;
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error ?? `HTTP ${res.status}`), { data });
-  return data;
+export async function api<T = any>(path: string, init?: { method?: string; body?: unknown; text?: boolean; timeout?: number }): Promise<T> {
+  const method = init?.method ?? (init?.body !== undefined ? "POST" : "GET");
+  const timeout = init?.timeout ?? (method.toUpperCase() === "GET" ? 10000 : 0);
+  const ac = new AbortController();
+  const timer = timeout === 0 ? undefined : setTimeout(() => ac.abort(), timeout); // a hung GET must reject so callers (chat poll inflight) can reset
+  try {
+    const res = await fetch(path, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: init?.body === undefined ? undefined : typeof init.body === "string" ? init.body : JSON.stringify(init.body),
+      signal: ac.signal,
+    });
+    if (init?.text) return (await res.text()) as T;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.error ?? `HTTP ${res.status}`), { data });
+    return data;
+  } finally { clearTimeout(timer); }
 }
 
 // ---- live bus: one WebSocket, many listeners
