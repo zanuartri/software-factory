@@ -64,11 +64,13 @@ export function useApi<T>(path: string | null, when: (e: FEvent) => boolean = ()
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const seq = useRef(0);
   const load = useCallback(() => {
     if (!path) return;
-    api<T>(path, { text }).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
+    const mine = ++seq.current;
+    api<T>(path, { text }).then((d) => { if (mine === seq.current) { setData(d); setError(null); } }).catch((e) => { if (mine === seq.current) setError(e.message); });
   }, [path, text]);
-  useEffect(() => { setData(null); load(); }, [load]);
+  useEffect(() => { setData(null); load(); return () => clearTimeout(timer.current); }, [load]);
   useEffect(() => { // daemon came back: refetch, since events emitted while we were offline are gone
     const f = (c: boolean) => { if (c) load(); };
     connListeners.add(f);
@@ -76,8 +78,8 @@ export function useApi<T>(path: string | null, when: (e: FEvent) => boolean = ()
   }, [load]);
   useLive((e) => {
     if (!when(e)) return;
-    clearTimeout(timer.current);
-    timer.current = setTimeout(load, 300);
+    if (timer.current !== undefined) return; // throttle: the first event of a burst schedules the refetch, later ones ride it
+    timer.current = setTimeout(() => { timer.current = undefined; load(); }, 300);
   });
   return { data, error, reload: load };
 }

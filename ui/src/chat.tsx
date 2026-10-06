@@ -66,11 +66,18 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const [atBottom, setAtBottom] = useState(true);
   const base = `/api/ws/${ws.id}/chat`;
 
-  const load = useCallback(() => api<Chat>(base).then(setChat).catch(() => {}), [base]);
+  const seq = useRef(0);
+  const inflight = useRef(false);
+  const load = useCallback(() => {
+    const mine = ++seq.current;
+    inflight.current = true;
+    const done = () => { if (mine === seq.current) inflight.current = false; };
+    return api<Chat>(base).then((d) => { if (mine === seq.current) setChat(d); done(); }).catch(done);
+  }, [base]);
   // ponytail: polling; the transcript file has no push channel. Swap for fs.watch + the existing /live socket if 1.5s feels slow.
   useEffect(() => {
     setChat(null); setPending([]); load();
-    const t = setInterval(() => { if (!document.hidden) load(); }, 1500);
+    const t = setInterval(() => { if (!document.hidden && !inflight.current) load(); }, 1500);
     return () => clearInterval(t);
   }, [load, ws.manager]);
   useEffect(() => { api<Cmd[]>(`${base}/commands`).then(setCmds).catch(() => {}); }, [base]);
