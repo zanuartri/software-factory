@@ -62,7 +62,7 @@ const BUILTIN: SlashCmd[] = [
   ["statusline", "Configure the status line"], ["theme", "Change the color theme"], ["sandbox", "Toggle sandbox mode"], ["ide", "Manage IDE integrations"],
   ["login", "Sign in to your Anthropic account"], ["logout", "Sign out of your Anthropic account"], ["exit", "Exit the CLI"],
   ["branch", "Branch the conversation to try another direction"], ["fork", "Copy the conversation into a background session"], ["btw", "Ask a side question without adding to the conversation"],
-  ["bug", "Report a bug with session context"], ["verify", "Build and run the app to confirm a change"], ["workflows", "Watch running workflows"],
+  ["bug", "Report a bug with session context"], ["workflows", "Watch running workflows"],
 ].map(([name, desc]) => ({ name, desc }));
 
 const frontDesc = (f: string) => readFileSync(f, "utf8").match(/^description:\s*(.+)$/m)?.[1].replace(/^["']|["']$/g, "").slice(0, 140) ?? "";

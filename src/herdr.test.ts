@@ -24,6 +24,19 @@ test("slashCommands lists the built-ins the menu was missing", () => {
   ]);
 });
 
+test("slashCommands drops verify (a bundled skill) and keeps the confirmed built-in commands", () => {
+  const desc: Record<string, string> = {};
+  for (const c of slashCommands(tmp())) desc[c.name] = c.desc;
+  expect(desc.verify).toBeUndefined(); // /verify is a bundled skill in Claude Code, not a built-in command
+  expect(["branch", "btw", "bug", "fork", "workflows"].map((n) => desc[n])).toEqual([
+    "Branch the conversation to try another direction",
+    "Ask a side question without adding to the conversation",
+    "Report a bug with session context",
+    "Copy the conversation into a background session",
+    "Watch running workflows",
+  ]);
+});
+
 test("slashCommands has no duplicate names and stays sorted", () => {
   const names = slashCommands(tmp()).map((c) => c.name);
   expect(names).toEqual([...new Set(names)]);
