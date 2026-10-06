@@ -106,6 +106,10 @@ export function readChat(session: string, limit = 300): Read {
       continue;
     }
     if (e.type === "attachment" && e.attachment?.type === "queued_command") { note(String(e.attachment.prompt ?? "").trim(), e.uuid ?? `q-${msgs.length}`); continue; }
+    if (e.type === "system") { // a built-in slash command's own entries: /reload-plugins, /model… carry no message field
+      if (e.subtype === "local_command" && typeof e.content === "string") note(e.content, e.uuid ?? `s-${msgs.length}`);
+      continue;
+    }
     if (e.isSidechain || !e.message) continue;
 
     if (e.type === "user") {

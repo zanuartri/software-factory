@@ -81,6 +81,16 @@ test("TodoWrite becomes a checklist; local command output becomes a notice", () 
   expect(r.msgs[1].notice).toMatchObject({ kind: "command", title: "Total cost: $0.10" });
 });
 
+test("a top-level system/local_command entry shows its stdout as a notice; other system subtypes stay hidden", () => {
+  write("s11", [
+    { type: "system", subtype: "local_command", uuid: "sys1", content: "<local-command-stdout>Reloaded: 4 plugins\nReloaded: x, y, z, w</local-command-stdout>" },
+    { type: "system", subtype: "turn_duration", uuid: "sys2", durationMs: 1200 },
+  ]);
+  expect(readChat("s11").msgs.map((m) => [m.role, m.text, m.notice?.kind, m.notice?.title])).toEqual([
+    ["notice", "Reloaded: 4 plugins\nReloaded: x, y, z, w", "command", "Reloaded: 4 plugins"],
+  ]);
+});
+
 const queued = (uuid: string, prompt: string) => ({ type: "attachment", uuid, attachment: { type: "queued_command", prompt } });
 const qop = (operation: string, content?: string) => ({ type: "queue-operation", operation, content });
 
