@@ -35,6 +35,7 @@ In Claude Code, inside the repo you want to work on:
 | `/factory:review` | checks gate evidence and diffs, then auto-merges the green tickets |
 | `/factory:issue [text]` | files an issue, or triages open ones (still valid? duplicate? fixed?) |
 | `/factory:auto` | issues → tickets → release → run, stopping at in_review, with a time and ticket budget; it never merges |
+| `/factory:finish` | rounds of issues → tickets → run → review → auto-merge green tickets until the board is done or the round/time budget runs out |
 | `/factory:status` · `/factory:doctor` · `/factory:gc` · `/factory:reflect` | status, health check, worktree cleanup, and turning lessons into rules |
 
 Live console: `factory ui` (http://127.0.0.1:4545). It has workers with phase progress, questions, activity,
