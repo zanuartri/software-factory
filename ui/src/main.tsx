@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { Bot, CircleDot, Kanban, PanelLeftOpen, ScrollText, Settings2 } from "lucide-react";
+import { Bot, CircleDot, FolderGit2, Kanban, PanelLeftOpen, ScrollText, Settings2 } from "lucide-react";
 import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useApi, useConnected, type Workspace } from "./api";
@@ -11,6 +11,7 @@ import "./styles.css";
 import { TicketDrawer } from "./ticket";
 import { Select } from "./select";
 import { Dot, ThemeToggle, Toast } from "./ui";
+import { Workspaces } from "./workspaces";
 
 const VIEWS = [
   { id: "board", label: "Board", icon: Kanban },
@@ -18,6 +19,7 @@ const VIEWS = [
   { id: "issues", label: "Issues", icon: CircleDot },
   { id: "rules", label: "Rules", icon: ScrollText },
   { id: "settings", label: "Settings", icon: Settings2 },
+  { id: "workspaces", label: "Workspaces", icon: FolderGit2 },
 ] as const;
 type View = (typeof VIEWS)[number]["id"];
 
@@ -126,14 +128,16 @@ function App() {
               <span className="truncate">Daemon offline<span className="hidden md:inline">. Data may be stale</span>. Run <code className="font-mono">factory up</code><span className="hidden md:inline">; this page reconnects on its own</span>.</span>
             </div>
           )}
-          {!ws ? (
+          {!ws && wss.error ? (
             <div className="grid h-full place-items-center">
               <div className="text-center">
-                <p className="text-[15px] font-semibold">{wss.error ? "Daemon is offline" : "No workspace yet"}</p>
-                <p className="mt-1 text-[13px] text-fg-muted">{wss.error ? <>Start it with <code className="font-mono">factory up</code></> : <>Open Claude Code in a repo and run <code className="font-mono">/factory:init</code></>}</p>
+                <p className="text-[15px] font-semibold">Daemon is offline</p>
+                <p className="mt-1 text-[13px] text-fg-muted">Start it with <code className="font-mono">factory up</code></p>
               </div>
             </div>
-          ) : route.view === "floor" ? <Floor key={ws.id} ws={ws} openTicket={openTicket} openBoard={() => go({ view: "board", ticket: null })} toast={setToast} />
+          ) : !ws && !wss.data ? null
+            : !ws || route.view === "workspaces" ? <Workspaces list={wss.data ?? []} reload={wss.reload} toast={setToast} open={(id, view) => go({ ws: id, view, ticket: null })} />
+            : route.view === "floor" ? <Floor key={ws.id} ws={ws} openTicket={openTicket} openBoard={() => go({ view: "board", ticket: null })} toast={setToast} />
             : route.view === "board" ? <Board key={ws.id} ws={ws} openTicket={openTicket} toast={setToast} />
             : route.view === "issues" ? <Issues key={ws.id} ws={ws} openTicket={openTicket} toast={setToast} />
             : route.view === "rules" ? <Rules key={ws.id} ws={ws} toast={setToast} />
