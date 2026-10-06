@@ -28,6 +28,8 @@ export const transcriptPath = (session: string) => {
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 // Reminders/tooling the harness injects into the transcript — never text the user typed.
 const INJECTED = /^<(system-reminder|local-command|command-|task-notification|agent-message|teammate-message|user-prompt-submit-hook)/;
+// Injected blocks note() renders as their own row: keep them past the per-block filter instead of dropping the reminder.
+const ROUTE = /^<(task-notification|command-|local-command-stdout|agent-message|teammate-message)/;
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
 const textOf = (c: unknown): string => (typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("\n") : "");
 const tag = (xml: string, name: string) => xml.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`))?.[1].trim() ?? "";
@@ -92,6 +94,15 @@ export function readChat(session: string, limit = 300): Read {
       if (out) msgs.push({ id: uuid, role: "notice", text: out, notice: { kind: "command", title: clip(out.split("\n")[0], 120), body: out.includes("\n") ? clip(out, 3000) : undefined } });
     } else if (/^(<command-message>[^<]*<\/command-message>\s*)?<command-name>/.test(raw)) { // built-ins are name-first, skill/plugin commands message-first; a mere mention mid-string is prose
       msgs.push({ id: uuid, role: "user", text: `${tag(raw, "command-name")} ${tag(raw, "command-args")}`.trim() });
+    } else if (raw.startsWith("<bash-input>")) { // a !-bash command the user ran
+      const cmd = tag(raw, "bash-input");
+      if (cmd) msgs.push({ id: uuid, role: "user", text: `!${cmd}` });
+    } else if (raw.startsWith("<bash-stdout") || raw.startsWith("<bash-stderr")) { // its output
+      const out = [tag(raw, "bash-stdout"), tag(raw, "bash-stderr")].map((s) => s.replace(ANSI, "").trim()).filter(Boolean).join("\n");
+      if (out) msgs.push({ id: uuid, role: "notice", text: out, notice: { kind: "command", title: clip(out.split("\n")[0], 120), body: out.includes("\n") ? clip(out, 3000) : undefined } });
+    } else if (raw.startsWith("<pasted_content")) { // a pasted block is the user's own text, unwrapped
+      const inner = tag(raw, "pasted_content");
+      if (inner) msgs.push({ id: uuid, role: "user", text: inner });
     } else if (/^\[Request interrupted/.test(raw)) {
       msgs.push({ id: uuid, role: "notice", text: raw, notice: { kind: "command", title: raw.includes("tool use") ? "Interrupted during a tool call" : "Interrupted" } });
     } else if (!INJECTED.test(raw.trim()) && !isMeta) msgs.push({ id: uuid, role: "user", text: raw }); // only injected reminders are hidden; "<div>" or "<3" is a real message
@@ -110,7 +121,8 @@ export function readChat(session: string, limit = 300): Read {
     }
     if (e.type === "attachment" && e.attachment?.type === "queued_command") { note(String(e.attachment.prompt ?? "").trim(), e.uuid ?? `q-${msgs.length}`); continue; }
     if (e.type === "system") { // a built-in slash command's own entries: /reload-plugins, /model… carry no message field
-      if (e.subtype === "local_command" && typeof e.content === "string") note(e.content, e.uuid ?? `s-${msgs.length}`);
+      if (!e.isSidechain && e.subtype === "local_command" && typeof e.content === "string" && (e.content.includes("<local-command-stdout>") || e.content.includes("<command-name>")))
+        note(e.content, e.uuid ?? `s-${msgs.length}`);
       continue;
     }
     if (e.isSidechain || !e.message) continue;
@@ -141,11 +153,13 @@ export function readChat(session: string, limit = 300): Read {
           else { t.agent.done = !b.is_error; t.agent.report = out; }
         }
       }
-      // A leading <system-reminder> block must not swallow the real text next to it: drop injected blocks one by one.
+      // A leading <system-reminder> block must not swallow the real text next to it: drop pure injected reminders one by one,
+      // but keep the blocks note() renders as their own row (task notifications, slash commands, bash output, pastes).
       const blocks = Array.isArray(content) ? content.filter((b) => b?.type === "text").map((b) => String(b.text ?? "")) : null;
-      const raw = (blocks ? blocks.filter((t) => !INJECTED.test(t.trim())).join("\n") : textOf(content)).trim();
+      const texts = blocks ? blocks.filter((t) => !INJECTED.test(t.trim()) || ROUTE.test(t.trim())) : [textOf(content)];
+      const raw = texts.filter((t) => t.trim()).join("\n");
       const images = Array.isArray(content) ? content.filter((b: any) => b.type === "image").length : 0;
-      if (raw) note(raw, e.uuid, e.isMeta);
+      for (const t of texts) if (t.trim()) note(t, e.uuid, e.isMeta);
       if (images) { const m = msgs.at(-1); if (raw && m && m.id === e.uuid) m.images = images; else msgs.push({ id: `${e.uuid}:img`, role: "user", text: "", images }); }
     } else if (e.type === "assistant" && Array.isArray(e.message.content)) {
       if (e.message.model && e.message.model !== "<synthetic>") model = e.message.model;

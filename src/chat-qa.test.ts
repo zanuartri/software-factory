@@ -160,3 +160,38 @@ test("entries repeated after a resume/compaction (same uuid) yield one row each"
   write("s15", [note("u1", "hello"), note("u1", "hello"), use("t1", "Bash", { command: "ls" }), use("t1", "Bash", { command: "ls" })]);
   expect(readChat("s15").msgs.map((m) => [m.role, m.text])).toEqual([["user", "hello"], ["tool", "Bash ls"]]);
 });
+
+test("a !-bash user command shows as a user bubble; its ANSI-stripped output becomes a command notice", () => {
+  write("s16", [
+    note("b1", "<bash-input>ls</bash-input>"),
+    note("b2", "<bash-stdout>\x1b[32ma.txt\x1b[0m\nb.txt</bash-stdout><bash-stderr>permission denied</bash-stderr>"),
+  ]);
+  expect(readChat("s16").msgs.map((m) => [m.role, m.text, m.notice?.kind])).toEqual([
+    ["user", "!ls", undefined],
+    ["notice", "a.txt\nb.txt\npermission denied", "command"],
+  ]);
+});
+
+test("a <pasted_content> user entry unwraps to the inner text", () => {
+  write("s17", [note("p1", '<pasted_content lines="2">hello\nworld</pasted_content>')]);
+  expect(readChat("s17").msgs.map((m) => [m.role, m.text])).toEqual([["user", "hello\nworld"]]);
+});
+
+test("an array-content text block that is a task-notification renders the task notice instead of being dropped", () => {
+  write("s18", [
+    use("b1", "Bash", { command: "sleep 9", run_in_background: true }), result("b1", "started", { backgroundTaskId: "bx1" }),
+    { type: "user", uuid: "n1", message: { role: "user", content: [{ type: "text", text: "<task-notification>\n<task-id>bx1</task-id>\n<tool-use-id>b1</tool-use-id>\n<status>completed</status>\n<summary>Background command done</summary>\n</task-notification>" }] } },
+  ]);
+  const r = readChat("s18");
+  expect(r.msgs[0].tool!.status).toBe("done");
+  expect(r.msgs[1].notice).toMatchObject({ kind: "task", status: "completed", title: "Background command done" });
+});
+
+test("a system/local_command entry with plain text or isSidechain yields no row, but its stdout still shows", () => {
+  write("s19", [
+    { type: "system", subtype: "local_command", uuid: "x1", content: "just some plain prose" },
+    { type: "system", subtype: "local_command", uuid: "x2", isSidechain: true, content: "<local-command-stdout>sidechain output</local-command-stdout>" },
+    { type: "system", subtype: "local_command", uuid: "x3", content: "<local-command-stdout>kept output</local-command-stdout>" },
+  ]);
+  expect(readChat("s19").msgs.map((m) => [m.role, m.text, m.notice?.kind])).toEqual([["notice", "kept output", "command"]]);
+});
