@@ -56,6 +56,4 @@ ui/         React + Vite + Tailwind console
 
 `FACTORY_PORT` (default 4545) and `FACTORY_HOME` (default `~/.factory`). Set both to run an isolated instance.
 
-Cost-first routing reads a global model catalog at `~/.factory/catalog.json`, with the same shape as a repo's `catalog`
-setting (`"<harness>:<model>"` → `{ cost, quality, family, caps? }`). A repo whose `.factory/settings.json` defines a
-non-empty `catalog` uses that instead — a new repo gets the global one for free; edit it by hand, `factory doctor` names it.
+Cost-first routing is off by default: workers and reviewers use their configured settings. Set `cost_routing: true` to route through a model catalog. Catalogs can be global at `~/.factory/catalog.json` or configured per repo with the same shape (`"<harness>:<model>"` → `{ cost, quality, family, caps? }`). A non-empty repo catalog overrides the global catalog; a new repo inherits the global one. `factory doctor` reports catalog routing information.

@@ -258,6 +258,7 @@ export function Settings({ ws, toast }: { ws: Workspace; toast: (m: string) => v
               </div>
             </Row>
             <Row label="Auto-merge when green" hint="With this on, /factory:review merges tickets that pass every check without asking you."><Switch checked={f.auto_merge} onChange={(v) => setF({ ...f, auto_merge: v })} label="auto merge" /></Row>
+            <Row label="Cost-first model routing (catalog)" hint="When enabled, workers and reviewers may use the cheapest qualifying catalog models instead of their configured models."><Switch checked={f.cost_routing} onChange={(v) => setF({ ...f, cost_routing: v })} label="cost-first routing" /></Row>
           </Group>
 
           <Group title="Permissions">

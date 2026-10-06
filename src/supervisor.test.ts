@@ -75,10 +75,30 @@ const CATALOG = {
 };
 function settingsWithCatalog() {
   const s = structuredClone(DEFAULT_SETTINGS);
+  s.cost_routing = true;
   s.harnesses.commandcode.enabled = true;
   s.catalog = structuredClone(CATALOG);
   return s;
 }
+
+test("pickWorker: default settings ignore cheaper catalog models", () => {
+  const s = structuredClone(DEFAULT_SETTINGS);
+  s.harnesses.commandcode.enabled = true;
+  s.catalog = { "commandcode:deepseek": { cost: 1, quality: 5, family: "deepseek" } };
+  expect(s.cost_routing).toBe(false);
+  expect(pickWorker(s, mkTicket(), [])).toEqual({ harness: "claude", model: "sonnet" });
+  expect(pickWorker(s, mkTicket({ harness: "omp", model: "openai-codex/gpt-6-luna" }), []))
+    .toEqual({ harness: "omp", model: "openai-codex/gpt-6-luna" });
+});
+
+test("pickReviewer: auto uses reviewer settings when cost routing is off", () => {
+  const s = structuredClone(DEFAULT_SETTINGS);
+  s.harnesses.commandcode.enabled = true;
+  s.reviewer_models.omp = "openai-codex/gpt-6-sol";
+  s.catalog = { "commandcode:deepseek": { cost: 1, quality: 5, family: "deepseek" } };
+  expect(pickReviewer(s, { harness: "claude", model: "sonnet" }))
+    .toEqual({ harness: "omp", model: "openai-codex/gpt-6-sol" });
+});
 
 test("pickWorker: the cheapest qualifying pair wins", () => {
   const s = settingsWithCatalog();
@@ -104,6 +124,7 @@ test("pickWorker: a ui tag requires the ui cap", () => {
 
 test("pickWorker: a high-difficulty retry (minQuality 5) takes the best free pair, not the default harness", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
+  s.cost_routing = true;
   s.harnesses.commandcode.enabled = true;
   s.catalog = {
     "commandcode:retry-cheap": { cost: 1, quality: 3, family: "a" },
@@ -114,6 +135,7 @@ test("pickWorker: a high-difficulty retry (minQuality 5) takes the best free pai
 
 test("pickWorker: the quality fallback never picks a max:0 (reviewer-only) harness", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
+  s.cost_routing = true;
   s.harnesses.commandcode.enabled = true;
   (s.harnesses.omp as any).max = 0; // highest quality, but not free
   s.catalog = {
@@ -136,6 +158,7 @@ test("pickWorker: an explicit ticket harness/model wins", () => {
 
 test("pickWorker: two equal-cost pairs alternate across calls", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
+  s.cost_routing = true;
   s.harnesses.commandcode.enabled = true;
   s.catalog = { "omp:tieA": { cost: 3, quality: 3, family: "a" }, "commandcode:tieB": { cost: 3, quality: 3, family: "b" } };
   const t = mkTicket();
@@ -151,6 +174,7 @@ test("pickWorker: an empty catalog gives today's result", () => {
 
 test("pickReviewer: the reviewer's family differs from the worker's and its quality is >= 4", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
+  s.cost_routing = true;
   s.harnesses.commandcode.enabled = true;
   s.catalog = {
     "claude:sonnet": { cost: 5, quality: 4, family: "claude" },
@@ -246,6 +270,7 @@ test("effectiveQuality: legacy gate.failed rows without ownFault still count", (
 
 test("pickWorker: a demoted pair loses to the next-cheapest qualifying pair", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
+  s.cost_routing = true;
   s.harnesses.commandcode.enabled = true;
   s.catalog = {
     "commandcode:demoted": { cost: 1, quality: 3, family: "a" },
@@ -271,6 +296,7 @@ test("pickReviewer: never comes from the worker's harness when the worker isn't 
 
 test("reviewerCheck: a same-harness reviewer from a different family passes", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
+  s.cost_routing = true;
   s.default_harness = "commandcode";
   s.harnesses.commandcode.enabled = true;
   s.harnesses.commandcode.model = "deepseek/deepseek-v4.1-flash";
@@ -283,6 +309,7 @@ test("reviewerCheck: a same-harness reviewer from a different family passes", ()
 
 test("reviewerCheck: a reviewer whose family matches the worker fails, even on another harness", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
+  s.cost_routing = true;
   s.harnesses.omp.enabled = false;
   s.harnesses.commandcode.enabled = true;
   s.reviewer_models.commandcode = "glm";

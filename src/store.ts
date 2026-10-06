@@ -35,6 +35,8 @@ export const DEFAULT_SETTINGS = {
   } as Record<Harness, { enabled: boolean; model: string; models: string[] }>,
   default_harness: "claude" as Harness,
   max_workers: 3,
+  /** true = cost-first catalog routing for workers and reviewers; false = only the models set in settings */
+  cost_routing: false,
   /** "auto" = cross-family pick (catalog, then reviewer_order); a harness pins every review to it, with `model` (empty = reviewer_models / harness default) */
   reviewer: { harness: "auto" as Harness | "auto", model: "" },
   reviewer_order: ["omp", "commandcode", "claude"] as Harness[],

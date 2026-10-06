@@ -179,25 +179,27 @@ export function pickWorker(s: store.Settings, t: store.Ticket, running: Run[], a
     if (!enabled(t.harness) || !free(t.harness)) return null;
     return { harness: t.harness, model: t.model !== "default" ? t.model : s.harnesses[t.harness].model };
   }
-  const minQuality = Math.min(5, (MIN_QUALITY[t.difficulty ?? "medium"] ?? 3) + (attempt - 1));
-  const allCaps = new Set(Object.values(s.catalog).flatMap((c) => c.caps ?? []));
-  const requiredCaps = t.tags.filter((tag) => allCaps.has(tag));
-  const activeCount = (h: Harness) => running.filter((r) => r.role === "worker" && r.harness === h && r.status !== "idle" && r.status !== "paused").length;
-  const pairs = Object.entries(s.catalog)
-    .map(([key, c]) => ({ key, ...c, harness: key.slice(0, key.indexOf(":")) as Harness, model: key.slice(key.indexOf(":") + 1), quality: effectiveQuality(key, c.quality) }))
-    .filter((c) => enabled(c.harness) && free(c.harness) && requiredCaps.every((tag) => (c.caps ?? []).includes(tag)));
-  const candidates = pairs.filter((c) => c.quality >= minQuality);
-  if (candidates.length) {
-    candidates.sort((a, b) => a.cost - b.cost || activeCount(a.harness) - activeCount(b.harness) || (lastPicked.get(a.key) ?? 0) - (lastPicked.get(b.key) ?? 0));
-    const pick = candidates[0];
-    lastPicked.set(pick.key, ++pickSeq);
-    return { harness: pick.harness, model: pick.model };
-  }
-  if (pairs.length) { // escalated past every pair's quality: take the best free one instead of dropping to the harness default
-    pairs.sort((a, b) => b.quality - a.quality || a.cost - b.cost);
-    const pick = pairs[0];
-    lastPicked.set(pick.key, ++pickSeq);
-    return { harness: pick.harness, model: pick.model };
+  if (s.cost_routing) {
+    const minQuality = Math.min(5, (MIN_QUALITY[t.difficulty ?? "medium"] ?? 3) + (attempt - 1));
+    const allCaps = new Set(Object.values(s.catalog).flatMap((c) => c.caps ?? []));
+    const requiredCaps = t.tags.filter((tag) => allCaps.has(tag));
+    const activeCount = (h: Harness) => running.filter((r) => r.role === "worker" && r.harness === h && r.status !== "idle" && r.status !== "paused").length;
+    const pairs = Object.entries(s.catalog)
+      .map(([key, c]) => ({ key, ...c, harness: key.slice(0, key.indexOf(":")) as Harness, model: key.slice(key.indexOf(":") + 1), quality: effectiveQuality(key, c.quality) }))
+      .filter((c) => enabled(c.harness) && free(c.harness) && requiredCaps.every((tag) => (c.caps ?? []).includes(tag)));
+    const candidates = pairs.filter((c) => c.quality >= minQuality);
+    if (candidates.length) {
+      candidates.sort((a, b) => a.cost - b.cost || activeCount(a.harness) - activeCount(b.harness) || (lastPicked.get(a.key) ?? 0) - (lastPicked.get(b.key) ?? 0));
+      const pick = candidates[0];
+      lastPicked.set(pick.key, ++pickSeq);
+      return { harness: pick.harness, model: pick.model };
+    }
+    if (pairs.length) { // escalated past every pair's quality: take the best free one instead of dropping to the harness default
+      pairs.sort((a, b) => b.quality - a.quality || a.cost - b.cost);
+      const pick = pairs[0];
+      lastPicked.set(pick.key, ++pickSeq);
+      return { harness: pick.harness, model: pick.model };
+    }
   }
   const h = pickHarness(s, t, running);
   return h ? { harness: h, model: t.model !== "default" ? t.model : s.harnesses[h].model } : null;
@@ -206,7 +208,7 @@ export function pickWorker(s: store.Settings, t: store.Ticket, running: Run[], a
 export function pickReviewer(s: store.Settings, impl: { harness: Harness; model: string }): { harness: Harness; model: string } {
   const pin = s.reviewer.harness; // an explicit choice in settings wins over every heuristic below
   if (pin !== "auto" && s.harnesses[pin]?.enabled) return { harness: pin, model: s.reviewer.model || s.reviewer_models[pin] || s.harnesses[pin].model };
-  if (Object.keys(s.catalog).length) {
+  if (s.cost_routing && Object.keys(s.catalog).length) {
     const implEntry = s.catalog[`${impl.harness}:${impl.model}`];
     const minQuality = Math.max(4, implEntry ? effectiveQuality(`${impl.harness}:${impl.model}`, implEntry.quality) : 0);
     const candidates = Object.entries(s.catalog)
