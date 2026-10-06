@@ -44,7 +44,7 @@ function watchWs(id: string, path: string) {
   let t: ReturnType<typeof setTimeout> | undefined;
   watchers.set(id, watch(join(path, ".factory"), { recursive: true }, () => {
     clearTimeout(t);
-    t = setTimeout(() => emit(id, "store.changed", {}), 250);
+    t = setTimeout(() => { if (watchers.has(id)) emit(id, "store.changed", {}); }, 250); // a removed workspace's debounce must not fire
   }));
 }
 type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
@@ -58,6 +58,14 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   "/api/workspaces": {
     GET: () => json(sup.listWorkspaces().map((w) => ({ ...w, settings: store.loadSettings(w.path), plan: sup.planState(w.id), counts: ticketCounts(w.path) }))),
     POST: async (req) => { const { path } = await body(req); const w = sup.registerWorkspace(path); watchWs(w.id, w.path); return json(w); },
+  },
+  "/api/workspaces/:id": {
+    DELETE: ({ params }) => {
+      const w = sup.removeWorkspace(params.id);
+      watchers.get(w.id)?.close();
+      watchers.delete(w.id);
+      return json({ ok: true, id: w.id });
+    },
   },
   /** Browsers can't hand back an absolute path, so the daemon opens the OS folder dialog on its own machine. */
   "/api/fs/pick-folder": { POST: async () => json({ path: await pickFolder() }) },

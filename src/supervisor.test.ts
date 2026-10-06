@@ -6,9 +6,9 @@ import type { Ticket } from "./store";
 import type { Harness } from "./db";
 
 process.env.FACTORY_HOME = mkdtempSync(join(tmpdir(), "factory-test-")); // before the db module opens ~/.factory
-const { bashPath, doctor, effectiveQuality, ownFault, scopesOverlap, pickReviewer, pickWorker, reviewerCheck } = await import("./supervisor");
+const { bashPath, doctor, effectiveQuality, listWorkspaces, ownFault, registerWorkspace, removeWorkspace, scopesOverlap, pickReviewer, pickWorker, reviewerCheck } = await import("./supervisor");
 const { DEFAULT_SETTINGS } = await import("./store");
-const { db } = await import("./db");
+const { db, getWs } = await import("./db");
 
 const mkTicket = (overrides: Partial<Ticket> = {}): Ticket => ({
   id: "T-1", title: "test", status: "open", priority: "p2", tags: [], depends_on: [], scope_paths: [],
@@ -335,3 +335,43 @@ test("pickReviewer: a pinned reviewer harness + model wins over the cross-family
   s.harnesses.commandcode.enabled = false; // a pin on a disabled harness falls back to auto
   expect(pickReviewer(s, { harness: "claude", model: "sonnet" }).harness).toBe("omp");
 });
+
+test("removeWorkspace: drops the row, leaves the repo and its .factory alone, and re-registers", () => {
+  const repo = mkdtempSync(join(tmpdir(), "factory-remove-"));
+  Bun.spawnSync(["git", "init", repo]);
+  try {
+    const ws = registerWorkspace(repo);
+    writeFileSync(join(repo, "keep.txt"), "repo file");
+    writeFileSync(join(repo, ".factory", "marker.txt"), "store file");
+
+    removeWorkspace(ws.id);
+
+    expect(db.query("SELECT * FROM workspaces WHERE id=?").get(ws.id)).toBeNull();
+    expect(listWorkspaces().some((w) => w.id === ws.id)).toBe(false);
+    expect(existsSync(join(repo, "keep.txt"))).toBe(true); // the repo is never touched
+    expect(existsSync(join(repo, ".factory", "marker.txt"))).toBe(true);
+    const again = registerWorkspace(repo); // re-registering the same path works
+    expect(again.id).toBe(ws.id);
+    removeWorkspace(again.id); // leave no row pointing at a repo this test deletes
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}, 20000);
+
+test("removeWorkspace: refuses while a run is active", () => {
+  const repo = mkdtempSync(join(tmpdir(), "factory-remove-run-"));
+  Bun.spawnSync(["git", "init", repo]);
+  try {
+    const ws = registerWorkspace(repo);
+    db.query("INSERT INTO runs (id,ws,ticket,role,harness,model,status,phase,token,started_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .run("r-remove-active", ws.id, "T-1", "worker", "claude", "sonnet", "running", "fix", "tok", Date.now());
+    expect(() => removeWorkspace(ws.id)).toThrow("workspace has active runs");
+    expect(getWs(ws.id)).not.toBeNull();
+
+    db.query("DELETE FROM runs WHERE id=?").run("r-remove-active"); // once the run is gone, removal goes through
+    removeWorkspace(ws.id);
+    expect(getWs(ws.id)).toBeNull();
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}, 20000);

@@ -50,6 +50,15 @@ export function mustWs(ws: string) {
   if (!w) throw new Error(`unknown workspace ${ws}`);
   return w;
 }
+/** Unregister a workspace: refuses while runs are live, stops its plan, drops only the workspaces row (runs/events/asks stay, repo untouched). */
+export function removeWorkspace(ws: string) {
+  const w = mustWs(ws);
+  if (activeRuns(w.id).length) throw new Error("workspace has active runs");
+  if (planState(w.id)?.active) stopPlan(w.id);
+  db.query("DELETE FROM workspaces WHERE id=?").run(w.id);
+  emit(w.id, "workspace.removed", { path: w.path });
+  return w;
+}
 
 // ------------------------------------------------------------------ helpers
 const runDir = (r: Pick<Run, "ws" | "ticket" | "id">) => join(HOME, "runs", r.ws, r.ticket, r.id);
