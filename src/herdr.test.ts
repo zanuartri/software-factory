@@ -2,7 +2,7 @@ import { expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bundledSkillsRoot, clearCommandCache, discoverBundled, noteSent, prompt, slashCommands } from "./herdr";
+import { bundledSkillsRoot, clearCommandCache, discoverBundled, noteSent, prompt, slashCommands, suggestionFrom } from "./herdr";
 
 setDefaultTimeout(20000);
 
@@ -134,4 +134,27 @@ test("noteSent clears the cache only for /reload-plugins", () => {
     noteSent(text);
     expect({ text, seen: slashCommands(cwd).some((c) => c.name === "t031-other") }).toEqual({ text, seen: false });
   }
+});
+const suggestionScreen = [
+  "────────────────────────────────────────────────────────────────────────",
+  "❯ \x1b[0m\x1b[2mName another common fruit.\x1b[0m",
+  "────────────────────────────────────────────────────────────────────────",
+].join("\n");
+const emptyScreen = "────────────────────────────────\n❯ \x1b[0m\n────────────────────────────────";
+const typedScreen = "────────────────────────────────\n❯ a real typed draft\n────────────────────────────────";
+const workingScreen = "❯ \x1b[0m\x1b[2mName another common fruit.\x1b[0m\n✻ Thinking…";
+const blockedScreen = [
+  "Accessing workspace:",
+  "Quick safety check: Is this a project you created or one you trust?",
+  "❯ No, exit",
+  "  Yes, I trust this folder",
+  "Enter to confirm · Esc to cancel",
+].join("\n");
+
+test("suggestionFrom recognizes dim Claude ghost text only on an idle input", () => {
+  expect(suggestionFrom(suggestionScreen)).toBe("Name another common fruit.");
+  expect(suggestionFrom(emptyScreen)).toBeNull();
+  expect(suggestionFrom(typedScreen)).toBeNull();
+  expect(suggestionFrom(workingScreen)).toBeNull();
+  expect(suggestionFrom(blockedScreen)).toBeNull();
 });

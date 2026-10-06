@@ -130,8 +130,32 @@ export function slashCommands(cwd: string, bundled?: string | null): SlashCmd[] 
 // ---- usage: Claude Code only hands context + rate limits to its statusline, so read them off the pane's rendered statusline
 export type Meter = { pct: number; reset?: string };
 export type Usage = { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null };
-/** One read of the pane's visible text serves usage and prompt detection. */
-export const readScreen = async (pane: string) => String(await herdr("agent", "read", pane, "--source", "visible", "--lines", "60").catch(() => ""));
+/** ANSI pane text supports suggestion detection and color-aware prompt parsing. */
+export const readAnsiScreen = async (pane: string) => String(await herdr("agent", "read", pane, "--source", "visible", "--lines", "60", "--format", "ansi").catch(() => ""));
+/** Claude renders prompt suggestions as dim text after the input marker; ordinary drafts are not dim. */
+export function suggestionFrom(screen: string): string | null {
+  if (/Accessing workspace:|Quick safety check:|Enter to confirm|Esc to cancel|trust this folder|✻\s*(?:Thinking|Working|Running)|Thinking…|esc to interrupt|ctrl\+c to interrupt/i.test(screen)) return null;
+  for (const line of screen.replace(/\r/g, "").split("\n").reverse()) {
+    const match = line.match(/^\s*❯(?:\u00a0|[ \t])?(.*)$/);
+    if (!match) continue;
+    let dim = false, invalid = false, text = "";
+    for (const part of match[1].split(/(\x1b\[[0-9;]*m)/)) {
+      const sgr = part.match(/^\x1b\[([0-9;]*)m$/);
+      if (sgr) {
+        const codes = sgr[1] ? sgr[1].split(";") : ["0"];
+        for (const code of codes) { if (code === "0" || code === "22") dim = false; else if (code === "2") dim = true; }
+      } else if (part.trim()) {
+        if (!dim) invalid = true;
+        text += part;
+      } else if (dim) text += part;
+    }
+    const suggestion = text.trim();
+    if (suggestion && !invalid) return suggestion;
+    return null;
+  }
+  return null;
+}
+
 export function usageFrom(t: string): Usage {
   const meter = (label: string): Meter | null => { const m = t.match(new RegExp(`${label}\\s+(\\d+)%(?:\\s*↻(\\S+))?`)); return m ? { pct: +m[1], reset: m[2] } : null; };
   const c = t.match(/ctx\s+\S+\s+(\d+)%\s+(\S+)\/(\S+)/);
@@ -144,11 +168,11 @@ export type { Prompt };
 
 /** The question on screen, if any. herdr's own status isn't reliable for this (it can say "done" with a question up), so the screen decides;
  *  `blocked` only buys a raw fallback for a dialog the parser doesn't know. */
-export async function promptFrom(pane: string, plain: string, blocked: boolean): Promise<Prompt | { raw: string } | null> {
+export async function promptFrom(pane: string, plain: string, blocked: boolean, ansiScreen?: string): Promise<Prompt | { raw: string } | null> {
   const p = parsePrompt(plain);
   if (!p) return blocked && plain.trim() ? { raw: plain } : null;
   if (!p.tabs.length) return p;
-  const ansi = String(await herdr("agent", "read", pane, "--source", "visible", "--lines", "60", "--format", "ansi").catch(() => "")); // the active tab is only visible in colour
+  const ansi = ansiScreen ?? String(await herdr("agent", "read", pane, "--source", "visible", "--lines", "60", "--format", "ansi").catch(() => "")); // the active tab is only visible in colour
   return parsePrompt(plain, ansi) ?? p;
 }
 

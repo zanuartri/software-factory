@@ -84,14 +84,16 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       let agent: herdr.HerdrAgent | null = null;
       try { agent = await managerAgent(w); } catch (e) { return json({ error: `herdr unavailable: ${e instanceof Error ? e.message : String(e)}` }, 503); } // wrap's 400 would read as "offline"; the UI poll swallows the 503 and keeps the last state
       const fresh = sup.mustWs(params.ws); // re-read: a /clear re-links the workspace to the pane's new session
-      if (!fresh.manager) return json({ session: null, status: "none", messages: [] });
+      if (!fresh.manager) return json({ session: null, status: "none", suggestion: null, messages: [] });
       const { msgs, model, activity, queued } = herdr.readChat(fresh.manager);
-      const screen = agent ? await herdr.readScreen(agent.pane_id) : "";
+      const ansiScreen = agent ? await herdr.readAnsiScreen(agent.pane_id) : "";
+      const screen = ansiScreen.replace(/\x1b\[[0-9;]*m/g, "");
       const usage = agent ? herdr.usageFrom(screen) : null;
-      const prompt = agent ? await herdr.promptFrom(agent.pane_id, screen, agent.agent_status === "blocked") : null;
+      const prompt = agent ? await herdr.promptFrom(agent.pane_id, screen, agent.agent_status === "blocked", ansiScreen) : null;
+      const suggestion = agent && ["idle", "done"].includes(agent.agent_status) ? herdr.suggestionFrom(ansiScreen) : null;
       // no pane: nothing will ever deliver the task notifications, so a "background" tool is dead — clear it on copies (readChat caches these objects)
       const live = !!agent;
-      return json({ session: fresh.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, prompt,
+      return json({ session: fresh.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, prompt, suggestion,
         activity: live ? activity : { ...activity, background: 0 }, queued,
         messages: live ? msgs : msgs.map((m) => (m.tool?.status === "background" ? { ...m, tool: { ...m.tool, status: "done" } } : m)) });
     },

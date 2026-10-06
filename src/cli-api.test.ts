@@ -150,6 +150,7 @@ function fakeHerdr() {
     `  const agents = existsSync(marker) ? [{ pane_id: "fake-pane", name: "", agent: "claude", agent_status: st, cwd: "", agent_session: { value: "s1" } }] : [];`,
     `  console.log(JSON.stringify({ result: { agents } }));`,
     `}`,
+    `else if (cmd === "agent" && sub === "read") console.log(process.argv.includes("--format") ? "❯ \\x1b[0m\\x1b[2mSuggested next prompt\\x1b[0m" : "❯ Suggested next prompt");`,
     `else if (cmd === "agent" && sub === "send-keys") { appendFileSync(keys, process.argv.slice(5).join(" ") + "\\n"); if (process.argv[5] === "esc" && existsSync(nextStatus)) writeFileSync(status, readFileSync(nextStatus, "utf8")); }`,
     `else if (cmd === "agent" && sub === "prompt") appendFileSync(keys, "prompt:" + process.argv.slice(5).join(" ") + "\\n");`,
     `else process.exit(0);`,
@@ -220,6 +221,7 @@ test("no live pane: background tasks clear as done; a started pane reports them 
     await d.post(`/api/ws/${w.id}/attach`, { session: "s1", force: true });
     const off = (await (await d.get(`/api/ws/${w.id}/chat`)).json()) as any;
     expect(off.status).toBe("offline");
+    expect(off.suggestion).toBeNull();
     expect(off.activity).toEqual({ running: null, background: 0 });
     expect(off.messages.map((m: any) => [m.tool?.name, m.tool?.status])).toEqual([["Bash", "done"]]);
     const start = (await (await d.post(`/api/ws/${w.id}/chat/start`, { resume: false })).json()) as { session: string };
@@ -229,7 +231,11 @@ test("no live pane: background tasks clear as done; a started pane reports them 
     expect(live.status).toBe("done"); // the fake pane's agent_status
     expect(live.pane).toBe("fake-pane");
     expect(live.activity).toEqual({ running: null, background: 1 }); // same transcript: the offline mapping copied, never mutated readChat's cache
+    expect(live.suggestion).toBe("Suggested next prompt");
     expect(live.messages.map((m: any) => [m.tool?.name, m.tool?.status])).toEqual([["Bash", "background"]]);
+    writeFileSync(d.fake.status, "working");
+    const working = (await (await d.get(`/api/ws/${w.id}/chat`)).json()) as any;
+    expect(working.suggestion).toBeNull();
   } finally { await d.stop(); }
 }, 30000);
 

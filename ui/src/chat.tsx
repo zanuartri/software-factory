@@ -6,7 +6,7 @@ import { AgentCard, NoticeRow, TodoCard, ToolRow, UserBubble, type Activity, typ
 import { Select } from "./select";
 import { Btn, Dot, Md } from "./ui";
 
-type Chat = { session: string | null; pane?: string | null; status: string; model?: string | null; activity?: Activity; queued?: string[]; prompt?: Prompt | { raw: string } | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[] };
+type Chat = { session: string | null; pane?: string | null; status: string; model?: string | null; activity?: Activity; queued?: string[]; prompt?: Prompt | { raw: string } | null; suggestion?: string | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[] };
 type Cmd = { name: string; desc: string };
 
 const STATUS: Record<string, { label: string; color: string }> = {
@@ -138,6 +138,8 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const msgs = chat?.messages ?? [];
   const lastTodo = [...msgs].reverse().find((m) => m.tool?.todos)?.id;
   const activity = chat?.activity;
+  const suggestion = chat?.suggestion && !text && !pending.length && (st === "idle" || st === "done") ? chat.suggestion : null;
+  const useSuggestion = () => { if (!suggestion) return; setText(suggestion); input.current?.focus(); };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
@@ -200,6 +202,10 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
 
       <div className="shrink-0 px-3 pt-1 pb-3">
         <div className={wide}>
+          {suggestion && <button type="button" aria-label="Use suggested prompt" onClick={useSuggestion}
+            className="mb-1 flex w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 text-left text-[11.5px] text-fg-muted transition-colors hover:bg-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent)_35%,transparent)]">
+            <span className="shrink-0">Suggested</span><span className="min-w-0 flex-1 truncate">{suggestion}</span><span className="shrink-0 text-fg-subtle">Tab to use</span>
+          </button>}
           <form onSubmit={(e) => { e.preventDefault(); send(); }}
             onDragOver={(e) => { if (live && e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDrag(true); } }} onDragLeave={() => setDrag(false)}
             onDrop={(e) => { setDrag(false); if (e.dataTransfer.files.length) { e.preventDefault(); addFiles([...e.dataTransfer.files]); } }}
@@ -230,6 +236,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
               onPaste={(e) => { const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/")); if (imgs.length) { e.preventDefault(); addFiles(imgs); } }}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return;
+                if (e.key === "Tab" && suggestion) { e.preventDefault(); useSuggestion(); return; }
                 if (matches.length) {
                   if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setSel((i) => (i + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length); return; }
                   if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && text.slice(1) !== matches[sel].name)) { e.preventDefault(); pick(matches[sel]); return; }
