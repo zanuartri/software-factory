@@ -141,6 +141,12 @@ body {
 .md code { font-family: var(--font-mono); font-size: .85em; background: var(--muted); border: 1px solid var(--border); padding: .05em .35em; border-radius: 5px; color: var(--fg); }
 .md pre { background: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: .75rem; overflow: auto; font-size: 12px; margin: .5em 0; }
 .md pre code { background: none; border: 0; padding: 0; }
+/* GFM tables: block so wide tables scroll inside the message instead of overflowing the bubble */
+.md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: .6em 0; font-size: 12.5px; line-height: 1.5; }
+.md th, .md td { border: 1px solid var(--border); padding: .35rem .65rem; text-align: left; vertical-align: top; }
+.md th { background: var(--muted); color: var(--fg); font-weight: 600; white-space: nowrap; }
+.md td { color: var(--fg-muted); min-width: 4rem; }
+.md tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--muted) 40%, transparent); }
 /* GFM task lists: one marker, drawn to match the custom Checkbox */
 .md li:has(> input[type=checkbox]) { list-style: none; margin-left: -1.2rem; }
 .md input[type=checkbox] { appearance: none; display: inline-grid; place-content: center; width: 14px; height: 14px; margin: 0 .5em 0 0; vertical-align: -2px; border: 1.5px solid var(--border-strong); border-radius: 4px; }
