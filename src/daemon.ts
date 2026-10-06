@@ -96,7 +96,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       if (!agent) throw new Error("manager session is not running in herdr — start or resume one");
       const b = await body(req);
       if (b.interrupt && agent.agent_status === "working") { await herdr.interrupt(agent.pane_id); await Bun.sleep(450); } // steer now: stop the current turn, then send
-      await herdr.prompt(agent.pane_id, b.text);
+      await herdr.prompt(agent.pane_id, b.text, agent.agent_status !== "blocked");
       herdr.noteSent(b.text); // /reload-plugins re-reads the plugin dirs, so the autocomplete must rescan instead of serving the 30s cache
       return json({ ok: true });
     },

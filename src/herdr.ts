@@ -20,7 +20,11 @@ export const findByName = async (name: string) => (await listAgents()).find((a) 
 export const nameAgent = (pane: string, name: string) => herdr("agent", "rename", pane, name);
 export const findAgent = async (session: string) => (await listAgents()).find((a) => a.agent === "claude" && a.agent_session?.value === session) ?? null;
 
-export const prompt = (pane: string, text: string) => herdr("agent", "prompt", pane, text);
+/** Clear the input box first (ctrl+u), or a draft/queued message restored by esc esc merges into `text`. Skip the clear while a modal is up: `clear=false` when the agent is blocked. */
+export const prompt = async (pane: string, text: string, clear = true) => {
+  if (clear) await herdr("agent", "send-keys", pane, "ctrl+u");
+  return herdr("agent", "prompt", pane, text);
+};
 export const interrupt = (pane: string) => herdr("agent", "send-keys", pane, "esc");
 
 /** New herdr workspace in `cwd` running claude (optionally `--resume <session>`); resolves to the claude session id once herdr reports it. */

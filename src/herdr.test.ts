@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bundledSkillsRoot, clearCommandCache, noteSent, slashCommands } from "./herdr";
+import { bundledSkillsRoot, clearCommandCache, noteSent, prompt, slashCommands } from "./herdr";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "herdr-cmd-"));
 /** A command file Claude Code would find under <cwd>/.claude/commands. */
@@ -65,6 +65,40 @@ test("clearCommandCache makes slashCommands re-read the command dirs", () => {
   expect(slashCommands(cwd).some((c) => c.name === "t031-fresh")).toBe(false); // still the cached list
   clearCommandCache();
   expect(slashCommands(cwd).find((c) => c.name === "t031-fresh")).toEqual({ name: "t031-fresh", desc: "probe t031-fresh" });
+});
+
+/** Records the argv of every `herdr` invocation and returns a process that prints nothing and exits 0. */
+function stubHerdr() {
+  const realSpawn = Bun.spawn;
+  const seen: string[][] = [];
+  (Bun as any).spawn = (args: string[]) => {
+    seen.push(args);
+    return { pid: 0, exitCode: null, stdout: new Blob([]).stream(), stderr: new Blob([]).stream(), exited: Promise.resolve(0) };
+  };
+  return { seen, restore: () => { (Bun as any).spawn = realSpawn; } };
+}
+
+test("prompt clears the input box before sending, in that order", async () => {
+  const { seen, restore } = stubHerdr();
+  try {
+    await prompt("pane-1", "hello");
+    expect(seen).toEqual([
+      ["herdr", "agent", "send-keys", "pane-1", "ctrl+u"],
+      ["herdr", "agent", "prompt", "pane-1", "hello"],
+    ]);
+  } finally {
+    restore();
+  }
+});
+
+test("prompt skips ctrl+u when the agent is blocked", async () => {
+  const { seen, restore } = stubHerdr();
+  try {
+    await prompt("pane-1", "hello", false);
+    expect(seen).toEqual([["herdr", "agent", "prompt", "pane-1", "hello"]]);
+  } finally {
+    restore();
+  }
 });
 
 test("noteSent clears the cache only for /reload-plugins", () => {
