@@ -16,10 +16,11 @@ function spawnCalls(src: string) {
   });
 }
 
-test("every spawn in src passes windowsHide: true", () => {
+test("background spawns hide their windows", () => {
   const files = readdirSync(dir).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
   const calls: string[] = [];
   for (const f of files) {
+    if (f === "folder-pick.ts") continue; // the Windows folder dialog must remain visible
     for (const call of spawnCalls(readFileSync(join(dir, f), "utf8"))) {
       if (f === "cli.ts" && call.includes('"start"')) continue; // `factory ui` opens the browser on purpose
       calls.push(`${f}: ${call}`);

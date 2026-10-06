@@ -3,14 +3,25 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pickFolder, pickFolderCmd } from "./folder-pick";
+import { pickFolder, pickFolderCmd, pickSpawnOpts, spawnOnce } from "./folder-pick";
 
 test("pickFolderCmd: windows powershell with -STA and a FolderBrowserDialog", () => {
   const cmd = pickFolderCmd("win32");
   expect(cmd[0]).toBe("powershell.exe");
   expect(cmd).toContain("-STA");
+  expect(cmd).toContain("-WindowStyle");
   expect(cmd.join(" ")).toContain("FolderBrowserDialog");
   expect(cmd.join(" ")).toContain("SelectedPath");
+});
+
+test("pickSpawnOpts: Windows does not hide the dialog process", () => {
+  const opts = pickSpawnOpts("win32");
+  expect(opts).not.toHaveProperty("windowsHide", true);
+});
+
+test("pickFolder: kills a runner that does not finish and returns null", async () => {
+  const picked = await pickFolder(() => spawnOnce([process.execPath, "-e", "await new Promise(() => {})"], 50));
+  expect(picked).toBeNull();
 });
 
 test("pickFolderCmd: mac uses osascript choose folder", () => {
