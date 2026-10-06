@@ -135,7 +135,7 @@ function App() {
                 <p className="mt-1 text-[13px] text-fg-muted">Start it with <code className="font-mono">factory up</code></p>
               </div>
             </div>
-          ) : !ws && !wss.data ? null
+          ) : !ws && !wss.data ? <div className="grid h-full place-items-center text-[13px] text-fg-muted" role="status">Loading…</div>
             : !ws || route.view === "workspaces" ? <Workspaces list={wss.data ?? []} reload={wss.reload} toast={setToast} open={(id, view) => go({ ws: id, view, ticket: null })} />
             : route.view === "floor" ? <Floor key={ws.id} ws={ws} openTicket={openTicket} openBoard={() => go({ view: "board", ticket: null })} toast={setToast} />
             : route.view === "board" ? <Board key={ws.id} ws={ws} openTicket={openTicket} toast={setToast} />

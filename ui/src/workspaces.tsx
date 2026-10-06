@@ -9,10 +9,11 @@ const MANAGER_LIVE_MS = 10 * 60e3; // same window the daemon uses to call a mana
 function Card({ w, open, remove }: { w: Workspace; open: () => void; remove: () => void }) {
   const [menu, setMenu] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const close = () => { setMenu(false); box.current?.querySelector("button")?.focus(); }; // first button in box = Actions trigger
   useEffect(() => {
     if (!menu) return;
-    const down = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setMenu(false); };
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(false); };
+    const down = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) close(); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     addEventListener("pointerdown", down); addEventListener("keydown", key);
     return () => { removeEventListener("pointerdown", down); removeEventListener("keydown", key); };
   }, [menu]);
@@ -43,7 +44,7 @@ function Card({ w, open, remove }: { w: Workspace; open: () => void; remove: () 
         <Btn size="icon" kind="ghost" title={`Actions for ${w.name}`} onClick={() => setMenu((x) => !x)}><MoreHorizontal className="size-4" /></Btn>
         {menu && (
           <div role="menu" aria-label={`${w.name} actions`} className="fade-up absolute top-9 right-0 w-40 rounded-xl border border-border bg-surface p-1 shadow-[var(--shadow-lg)]">
-            <button role="menuitem" autoFocus onClick={() => { setMenu(false); remove(); }} className="flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-[13px] text-danger outline-none hover:bg-hover focus-visible:bg-hover">
+            <button role="menuitem" autoFocus onClick={() => { close(); remove(); }} className="flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-[13px] text-danger outline-none hover:bg-hover focus-visible:bg-hover">
               <Trash2 className="size-3.5" />Remove
             </button>
           </div>
