@@ -14,6 +14,48 @@ function addCommand(cwd: string, name: string) {
   writeFileSync(join(dir, `${name}.md`), `---\ndescription: probe ${name}\n---\n\nbody\n`);
 }
 
+function pluginFixture(home: string, marketplace: string, source: unknown, live = true) {
+  const claude = join(home, ".claude");
+  const install = join(claude, "plugins", "cache", "factory");
+  const livePlugin = join(home, "plugin");
+  mkdirSync(join(install, "commands"), { recursive: true });
+  writeFileSync(join(install, "commands", "cache-only.md"), "---\ndescription: from cache\n---\n");
+  writeFileSync(join(install, "commands", "clash.md"), "---\ndescription: cache description\n---\n");
+  writeFileSync(join(claude, "plugins", "installed_plugins.json"), JSON.stringify({ plugins: { "factory@market": [{ installPath: install }] } }));
+  mkdirSync(join(claude, "plugins"), { recursive: true });
+  writeFileSync(join(claude, "plugins", "known_marketplaces.json"), JSON.stringify({ market: { source: { source: marketplace, path: home }, installLocation: home } }));
+  if (marketplace === "directory") {
+    mkdirSync(join(home, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(home, ".claude-plugin", "marketplace.json"), JSON.stringify({ plugins: [{ name: "factory", source }] }));
+    if (live) {
+      mkdirSync(join(livePlugin, "commands"), { recursive: true });
+      writeFileSync(join(livePlugin, "commands", "new.md"), "---\ndescription: live new command\n---\n");
+      writeFileSync(join(livePlugin, "commands", "clash.md"), "---\ndescription: live description\n---\n");
+    }
+  }
+  return { claude, install, livePlugin };
+}
+
+test("slashCommands scans live directory-marketplace plugins before cache", () => {
+  const home = tmp();
+  pluginFixture(home, "directory", "./plugin");
+  const commands = slashCommands(tmp(), null, join(home, ".claude"));
+  expect(commands.find((c) => c.name === "factory:new")).toEqual({ name: "factory:new", desc: "live new command" });
+  expect(commands.find((c) => c.name === "factory:clash")).toEqual({ name: "factory:clash", desc: "live description" });
+  expect(commands.find((c) => c.name === "factory:cache-only")).toEqual({ name: "factory:cache-only", desc: "from cache" });
+});
+
+test("slashCommands keeps cache discovery for non-directory and missing live plugins", () => {
+  for (const [marketplace, live] of [["github", true], ["directory", false]] as const) {
+    const home = tmp();
+    pluginFixture(home, marketplace, "./plugin", live);
+    const commands = slashCommands(tmp(), null, join(home, ".claude"));
+    expect(commands.find((c) => c.name === "factory:cache-only")).toEqual({ name: "factory:cache-only", desc: "from cache" });
+    expect(commands.find((c) => c.name === "factory:new")).toBeUndefined();
+    expect(commands.find((c) => c.name === "factory:clash")).toEqual({ name: "factory:clash", desc: "cache description" });
+  }
+});
+
 test("slashCommands lists the built-ins the menu was missing", () => {
   const missing = new Set(["reload-plugins", "goal", "remote-control", "fast", "feedback", "loop", "usage"]);
   expect(slashCommands(tmp()).filter((c) => missing.has(c.name))).toEqual([

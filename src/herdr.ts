@@ -107,17 +107,39 @@ export function noteSent(text: string) {
 }
 /** Swappable so a test can count evaluations; the discovery runs only on a cache miss. */
 export const discoverBundled = { get: bundledSkillsRoot };
-export function slashCommands(cwd: string, bundled?: string | null): SlashCmd[] {
+export function slashCommands(cwd: string, bundled?: string | null, home = join(homedir(), ".claude")): SlashCmd[] {
   const hit = cmdCache.get(cwd);
   if (hit && Date.now() - hit.at < 30e3) return hit.cmds;
   const root = bundled === undefined ? discoverBundled.get() : bundled;
   const out: SlashCmd[] = [];
-  const home = join(homedir(), ".claude");
   scan(home, "", out);
   scan(join(cwd, ".claude"), "", out);
+  let marketplaces = new Map<string, unknown>();
   try {
-    const plugins = JSON.parse(readFileSync(join(home, "plugins", "installed_plugins.json"), "utf8")).plugins ?? {};
-    for (const [key, installs] of Object.entries<any[]>(plugins)) for (const i of installs) if (i.installPath && existsSync(i.installPath)) scan(i.installPath, `${key.split("@")[0]}:`, out);
+    const data: unknown = JSON.parse(readFileSync(join(home, "plugins", "known_marketplaces.json"), "utf8"));
+    if (data && typeof data === "object") marketplaces = new Map(Object.entries(data));
+  } catch {}
+  try {
+    const pluginData: unknown = JSON.parse(readFileSync(join(home, "plugins", "installed_plugins.json"), "utf8"));
+    if (!pluginData || typeof pluginData !== "object" || !("plugins" in pluginData) || !pluginData.plugins || typeof pluginData.plugins !== "object") throw new Error("Invalid installed plugins");
+    for (const [key, value] of Object.entries(pluginData.plugins)) if (Array.isArray(value)) for (const i of value) {
+      if (!i || typeof i !== "object" || !("installPath" in i) || typeof i.installPath !== "string") continue;
+      const [name, marketplace] = key.split("@");
+      const source = marketplaces.get(marketplace);
+      if (source && typeof source === "object" && "source" in source && source.source && typeof source.source === "object" && "source" in source.source && source.source.source === "directory" && "installLocation" in source && typeof source.installLocation === "string") {
+        try {
+          const manifest: unknown = JSON.parse(readFileSync(join(source.installLocation, ".claude-plugin", "marketplace.json"), "utf8"));
+          if (manifest && typeof manifest === "object" && "plugins" in manifest && Array.isArray(manifest.plugins)) {
+            const plugin = manifest.plugins.find((p) => p && typeof p === "object" && "name" in p && p.name === name);
+            if (plugin && typeof plugin === "object" && "source" in plugin && typeof plugin.source === "string" && plugin.source.startsWith("./")) {
+              const live = join(source.installLocation, plugin.source);
+              if (existsSync(live)) scan(live, `${name}:`, out);
+            }
+          }
+        } catch {}
+      }
+      if (existsSync(i.installPath)) scan(i.installPath, `${name}:`, out);
+    }
   } catch {}
   if (root) scanSkills(root, "", out); // bundled skills register without a prefix
   const seen = new Set<string>();
