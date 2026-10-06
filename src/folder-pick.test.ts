@@ -16,13 +16,21 @@ test("pickFolderCmd: windows powershell with -STA and a FolderBrowserDialog", ()
 
 test("pickSpawnOpts: Windows does not hide the dialog process", () => {
   const opts = pickSpawnOpts("win32");
-  expect(opts).not.toHaveProperty("windowsHide", true);
+  expect(opts).not.toHaveProperty("windowsHide");
 });
 
-test("pickFolder: kills a runner that does not finish and returns null", async () => {
-  const picked = await pickFolder(() => spawnOnce([process.execPath, "-e", "await new Promise(() => {})"], 50));
-  expect(picked).toBeNull();
+test("pickSpawnOpts: non-Windows platforms hide the dialog process", () => {
+  expect(pickSpawnOpts("linux")).toHaveProperty("windowsHide", true);
+  expect(pickSpawnOpts("darwin")).toHaveProperty("windowsHide", true);
 });
+
+// Exercises Bun's real child-process timeout and kill behavior; fake timers cannot advance the child process.
+test("spawnOnce: timeout returns failure shortly after killing a non-finishing child", async () => {
+  const started = performance.now();
+  const result = await spawnOnce([process.execPath, "-e", "setInterval(() => {}, 1000)"], 50);
+  expect(result).toEqual({ stdout: "", exitCode: 1 });
+  expect(performance.now() - started).toBeLessThan(5000);
+}, 20000);
 
 test("pickFolderCmd: mac uses osascript choose folder", () => {
   const cmd = pickFolderCmd("darwin");

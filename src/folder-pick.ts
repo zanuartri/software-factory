@@ -27,7 +27,7 @@ export async function spawnOnce(cmd: string[], timeoutMs = 5 * 60 * 1000): Promi
   const result = await Promise.race([output, timedOut]);
   clearTimeout(timer);
   if (result) return { stdout: result[0], exitCode: result[2] };
-  await output;
+  await Promise.race([output.catch(() => {}), Bun.sleep(2000)]);
   return { stdout: "", exitCode: 1 };
 }
 
