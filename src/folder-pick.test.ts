@@ -44,7 +44,11 @@ test("pickFolder: trims the picked path", async () => {
 
 test("pickFolder: a missing dialog binary names the fix", async () => {
   const enoent = Object.assign(new Error("spawn zenity ENOENT"), { code: "ENOENT" });
-  expect(pickFolder(async () => { throw enoent; })).rejects.toThrow("no folder dialog available (install zenity)");
+  await expect(pickFolder(async () => { throw enoent; })).rejects.toThrow("no folder dialog available (install zenity)");
+});
+
+test("pickFolder: a non-ENOENT error is rethrown unchanged", async () => {
+  await expect(pickFolder(async () => { throw new Error("type not found"); })).rejects.toThrow("type not found");
 });
 
 type WsRow = { id: string; path: string; counts: Record<string, number> };

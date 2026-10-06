@@ -19,10 +19,7 @@ const spawnOnce: FolderPickRunner = async (cmd) => {
   return { stdout, exitCode };
 };
 
-const missingBinary = (e: unknown) => {
-  const code = e && typeof e === "object" && "code" in e ? e.code : undefined;
-  return code === "ENOENT" || /ENOENT|not found|no such file/i.test(e instanceof Error ? e.message : String(e));
-};
+const missingBinary = (e: unknown) => (e as any)?.code === "ENOENT";
 
 /** Resolves the picked path, or null when the user cancels (no output / non-zero exit). A machine without a dialog binary is an error. */
 export async function pickFolder(run: FolderPickRunner = spawnOnce): Promise<string | null> {
