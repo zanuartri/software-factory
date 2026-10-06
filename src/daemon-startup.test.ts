@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -84,6 +84,7 @@ test("DELETE /api/workspaces/:id unregisters the workspace but not the repo", as
     const created = await api("/api/workspaces", { method: "POST", body: JSON.stringify({ path: repo }) }).then((r) => r.json() as Promise<{ id: string }>);
     id = created.id;
     expect(created.id).toBeTruthy();
+    mkdirSync(join(repo, ".factory"), { recursive: true }); // a layout regression must fail the assertions, not throw ENOENT here
     writeFileSync(join(repo, ".factory", "marker.txt"), "store file");
 
     expect((await api(`/api/workspaces/${created.id}`, { method: "DELETE" })).status).toBe(200);

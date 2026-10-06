@@ -182,7 +182,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
     GET: ({ params }) => {
       const p = wsPath(params.ws), t = store.getTicket(p, params.id);
       if (!t) return json({ error: "not found" }, 404);
-      const runs = db.query("SELECT * FROM runs WHERE ws=? AND ticket=? ORDER BY started_at DESC").all(params.ws, params.id) as Run[];
+      const runs = db.query("SELECT * FROM runs WHERE ws=? AND ticket=? ORDER BY started_at DESC, rowid DESC").all(params.ws, params.id) as Run[];
       const w = runs.find((r) => r.role === "worker"); // runs are newest-first
       return json({ ...t, brief_errors: store.validateBrief(t), run: w ? { harness: w.harness, model: w.model } : null, runs: runs.map((r) => ({ ...r, token: undefined })) });
     },

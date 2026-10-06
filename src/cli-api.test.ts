@@ -95,7 +95,7 @@ test("GET /api/ws/:ws/tickets attaches the latest worker run (harness, model) or
   const home = mkdtempSync(join(tmpdir(), "factory-runs-home-")), repo = mkdtempSync(join(tmpdir(), "factory-runs-repo-"));
   const tickets = join(repo, ".factory", "tickets");
   mkdirSync(tickets, { recursive: true });
-  for (const id of ["T-001", "T-002", "T-003"]) writeFileSync(join(tickets, `${id}-x.md`), `---\nid: ${id}\ntitle: x\nstatus: open\npriority: p2\n---\n\n## Goal\nG\n`);
+  for (const id of ["T-001", "T-002", "T-003", "T-004"]) writeFileSync(join(tickets, `${id}-x.md`), `---\nid: ${id}\ntitle: x\nstatus: open\npriority: p2\n---\n\n## Goal\nG\n`);
   expect(Bun.spawnSync(["git", "init", "-q"], { cwd: repo, stdout: "ignore", stderr: "ignore", windowsHide: true }).exitCode).toBe(0);
   const port = (() => { const l = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); const p = l.port; l.stop(true); return p; })();
   const p = Bun.spawn(["bun", join(import.meta.dir, "daemon.ts")], { env: { ...process.env, FACTORY_PORT: String(port), FACTORY_HOME: home }, stdout: "ignore", stderr: "pipe", windowsHide: true });
@@ -116,11 +116,13 @@ test("GET /api/ws/:ws/tickets attaches the latest worker run (harness, model) or
     run("r3", w.id, "T-001", "reviewer", "commandcode", "x", 300); // a later reviewer run never counts
     run("r4", w.id, "T-002", "reviewer", "claude", "opus", 100); // reviewer only: no worker run
     run("r5", "other", "T-003", "worker", "claude", "haiku", 100); // another workspace
+    run("r6", w.id, "T-004", "worker", "claude", "sonnet", 400);
+    run("r7", w.id, "T-004", "worker", "omp", "mimo", 400); // same started_at: rowid tiebreak, last insert wins
     seeded.close();
     const list = (await (await get(`/api/ws/${w.id}/tickets`)).json()) as { id: string; run: unknown }[];
-    expect(Object.fromEntries(list.map((t) => [t.id, t.run]))).toEqual({ "T-001": { harness: "omp", model: null }, "T-002": null, "T-003": null });
+    expect(Object.fromEntries(list.map((t) => [t.id, t.run]))).toEqual({ "T-001": { harness: "omp", model: null }, "T-002": null, "T-003": null, "T-004": { harness: "omp", model: "mimo" } });
     const one = async (id: string) => ((await (await get(`/api/ws/${w.id}/tickets/${id}`)).json()) as { run: unknown }).run;
-    expect([await one("T-001"), await one("T-002")]).toEqual([{ harness: "omp", model: null }, null]);
+    expect([await one("T-001"), await one("T-002"), await one("T-004")]).toEqual([{ harness: "omp", model: null }, null, { harness: "omp", model: "mimo" }]);
   } finally {
     await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST" }).catch(() => {});
     await Promise.race([p.exited, Bun.sleep(3000)]);

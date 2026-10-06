@@ -6,7 +6,7 @@ import type { Ticket } from "./store";
 import type { Harness } from "./db";
 
 process.env.FACTORY_HOME = mkdtempSync(join(tmpdir(), "factory-test-")); // before the db module opens ~/.factory
-const { bashPath, doctor, effectiveQuality, listWorkspaces, ownFault, registerWorkspace, removeWorkspace, scopesOverlap, pickReviewer, pickWorker, reviewerCheck } = await import("./supervisor");
+const { bashPath, doctor, effectiveQuality, listWorkspaces, ownFault, planState, registerWorkspace, removeWorkspace, scopesOverlap, startPlan, pickReviewer, pickWorker, reviewerCheck } = await import("./supervisor");
 const { DEFAULT_SETTINGS } = await import("./store");
 const { db, getWs } = await import("./db");
 
@@ -400,6 +400,29 @@ test("removeWorkspace: idle/paused leftovers do not block; starting/running/gati
     }
     removeWorkspace(again.id);
     expect(getWs(again.id)).toBeNull();
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}, 20000);
+
+test("removeWorkspace: drops the plan entry so a re-registered workspace starts clean", () => {
+  const repo = mkdtempSync(join(tmpdir(), "factory-remove-plan-"));
+  Bun.spawnSync(["git", "init", repo]);
+  try {
+    const ws = registerWorkspace(repo);
+    db.query("INSERT INTO runs (id,ws,ticket,role,harness,model,status,phase,token,started_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .run("r-remove-plan", ws.id, "T-1", "worker", "claude", "sonnet", "running", "fix", "tok", Date.now());
+    startPlan(ws.id, { only: ["T-1"] });
+    expect(planState(ws.id)?.active).toBe(true); // the running worker keeps the plan alive (no ticket ever drains it)
+
+    db.query("DELETE FROM runs WHERE id=?").run("r-remove-plan"); // removeWorkspace refuses while a run is active
+    removeWorkspace(ws.id);
+    expect(planState(ws.id)).toBeNull(); // the entry is gone, not merely inactive
+
+    const again = registerWorkspace(repo);
+    expect(planState(again.id)).toBeNull(); // no stale scheduling state leaks into the re-registered workspace
+    startPlan(again.id);
+    expect(planState(again.id)).toMatchObject({ started: 0, only: undefined }); // a fresh plan, not the removed one's
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
