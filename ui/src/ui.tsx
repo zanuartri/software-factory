@@ -83,9 +83,9 @@ export const Md = ({ text, className = "" }: { text: string; className?: string 
   <div className={`md ${className}`} dangerouslySetInnerHTML={{ __html: marked.parse(text || "", { async: false }) as string }} />
 );
 
-export function PageHeader({ title, sub, children }: { title: string; sub?: ReactNode; children?: ReactNode }) {
+export function PageHeader({ title, sub, children, className = "" }: { title: string; sub?: ReactNode; children?: ReactNode; className?: string }) {
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4 md:px-6">
+    <header className={`flex h-12 shrink-0 items-center gap-3 border-b border-border ${className || "px-4 md:px-6"}`}>
       <h1 className="shrink-0 text-[15px] font-semibold tracking-tight">{title}</h1>
       {sub && <span className="hidden truncate text-[13px] text-fg-subtle md:inline">{sub}</span>}
       <div className="ml-auto flex min-w-0 items-center gap-2">{children}</div>

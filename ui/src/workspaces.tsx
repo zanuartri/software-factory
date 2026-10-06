@@ -100,7 +100,7 @@ export function Workspaces({ list, reload, open, toast }: { list: Workspace[]; r
   };
   return (
     <>
-      <PageHeader title="Workspaces" sub={`${list.length} registered`} />
+      <PageHeader title="Workspaces" sub={`${list.length} registered`} className="px-0" />
       <div className="min-h-0 flex-1 overflow-y-auto py-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {list.map((w) => <Card key={w.id} w={w} open={() => open(w.id)} remove={() => remove(w)} />)}

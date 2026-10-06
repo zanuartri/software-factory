@@ -63,9 +63,18 @@ function App() {
   const clear = useCallback(() => setToast(null), []);
   const connected = useConnected();
   const ws = route.ws ? wss.data?.find((w) => w.id === route.ws) : undefined;
-  const openTicket = (ticket: string) => go({ ws: ws?.id, ticket });
   useTabIdentity(ws, route.ws ? route.view : "workspaces");
 
+  if (route.ws && !ws && (wss.error || !wss.data)) return (
+    <div className="grid h-full place-items-center">
+      {wss.error ? (
+        <div className="text-center">
+          <p className="text-[15px] font-semibold">Daemon is offline</p>
+          <p className="mt-1 text-[13px] text-fg-muted">Start it with <code className="font-mono">factory up</code></p>
+        </div>
+      ) : <div className="text-[13px] text-fg-muted" role="status">Loading…</div>}
+    </div>
+  );
   if (!ws) return (
     <div className="flex h-full flex-col bg-bg">
       <header className="flex h-13 shrink-0 items-center gap-3 border-b border-border px-4">
@@ -85,15 +94,16 @@ function App() {
       <Toast msg={toast} onDone={clear} />
     </div>
   );
+  const openTicket = (ticket: string) => go({ ws: ws.id, ticket });
   return (
     <div className="flex h-full flex-col">
       <nav className="flex h-13 shrink-0 items-center gap-3 border-b border-border bg-bg px-3" aria-label="main">
-        <Select variant="bare" className="w-auto max-w-[240px] shrink-0" ariaLabel="workspace" value={ws?.id ?? ""} onChange={(v) => go({ ws: v, ticket: null })}
+        <Select variant="bare" className="w-auto max-w-[240px] shrink-0" ariaLabel="workspace" value={ws.id} onChange={(v) => go({ ws: v, ticket: null })}
           options={(wss.data ?? []).map((w) => ({ value: w.id, label: w.name, hint: w.path.split(/[\/]/).slice(-2).join("/") }))}
           renderValue={() => (
-            <span className="flex min-w-0 items-center gap-2" title={ws?.path}>
-              <span className="grid size-6 shrink-0 place-items-center rounded-md bg-primary text-[12px] font-semibold text-primary-fg">{(ws?.name ?? "F")[0].toUpperCase()}</span>
-              <span className="hidden truncate text-[13px] font-semibold sm:block">{ws?.name ?? "Factory"}</span>
+            <span className="flex min-w-0 items-center gap-2" title={ws.path}>
+              <span className="grid size-6 shrink-0 place-items-center rounded-md bg-primary text-[12px] font-semibold text-primary-fg">{ws.name[0].toUpperCase()}</span>
+              <span className="hidden truncate text-[13px] font-semibold sm:block">{ws.name}</span>
             </span>
           )} />
         <button onClick={() => go({ ws: null, ticket: null })} title="All workspaces" aria-label="All workspaces" className="grid size-8 shrink-0 place-items-center rounded-lg text-fg-muted transition-colors hover:bg-hover hover:text-fg">
@@ -109,7 +119,7 @@ function App() {
                 className={`relative flex h-7 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors ${route.view === v.id ? "bg-surface text-fg shadow-[var(--shadow)]" : "text-fg-muted hover:text-fg"}`}>
                 <v.icon className="size-3.5" strokeWidth={1.75} />
                 <span className="hidden md:inline">{v.label}</span>
-                {v.id === "floor" && ws?.plan?.active && <Dot on pulse color="var(--accent)" />}
+                {v.id === "floor" && ws.plan?.active && <Dot on pulse color="var(--accent)" />}
               </button>
             </div>
           ))}
@@ -125,7 +135,7 @@ function App() {
 
       <div className="relative flex min-h-0 flex-1">
         {/* chat is the left column on wide screens; below lg it covers the content */}
-        {ws && chatOpen && (
+        {chatOpen && (
           <aside className={`absolute inset-0 z-30 lg:relative lg:border-border ${chatMax ? "lg:min-w-0 lg:flex-1" : "lg:w-(--chat-w) lg:shrink-0 lg:border-r"}`} style={{ "--chat-w": `${chatW}px` } as React.CSSProperties} aria-label="manager chat">
             {!chatMax && <div onPointerDown={drag} onDoubleClick={() => { setChatW(400); try { localStorage.removeItem("chatW"); } catch {} }} role="separator" aria-orientation="vertical" aria-label="Resize chat" title="Drag to resize · double-click to reset"
               className="absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize touch-none transition-colors hover:bg-accent/30 active:bg-accent/40 lg:block" />}
@@ -133,7 +143,7 @@ function App() {
           </aside>
         )}
 
-        {ws && !chatOpen && (
+        {!chatOpen && (
           <button onClick={() => setChatOpen(true)} title="Expand manager chat" aria-label="Expand manager chat"
             className="flex w-10 shrink-0 flex-col items-center gap-3 border-r border-border bg-bg py-3 text-fg-muted transition-colors hover:bg-hover hover:text-fg">
             <PanelLeftOpen className="size-4" strokeWidth={1.75} />
@@ -142,22 +152,14 @@ function App() {
         )}
 
         <main className={`min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${chatOpen && chatMax ? "hidden" : "flex"}`}>
-          {!connected && ws && (
+          {!connected && (
             <div role="alert" className="flex items-center gap-2 border-b px-4 py-2 text-[12.5px] md:px-6"
               style={{ color: "var(--warning)", borderColor: "color-mix(in srgb, var(--warning) 30%, transparent)", background: "color-mix(in srgb, var(--warning) 8%, transparent)" }}>
               <Dot on color="var(--warning)" pulse />
               <span className="truncate">Daemon offline<span className="hidden md:inline">. Data may be stale</span>. Run <code className="font-mono">factory up</code><span className="hidden md:inline">; this page reconnects on its own</span>.</span>
             </div>
           )}
-          {!ws && wss.error ? (
-            <div className="grid h-full place-items-center">
-              <div className="text-center">
-                <p className="text-[15px] font-semibold">Daemon is offline</p>
-                <p className="mt-1 text-[13px] text-fg-muted">Start it with <code className="font-mono">factory up</code></p>
-              </div>
-            </div>
-          ) : !ws && !wss.data ? <div className="grid h-full place-items-center text-[13px] text-fg-muted" role="status">Loading…</div>
-            : route.view === "floor" ? <Floor key={ws.id} ws={ws} openTicket={openTicket} openBoard={() => go({ view: "board", ticket: null })} toast={setToast} />
+          {route.view === "floor" ? <Floor key={ws.id} ws={ws} openTicket={openTicket} openBoard={() => go({ view: "board", ticket: null })} toast={setToast} />
             : route.view === "board" ? <Board key={ws.id} ws={ws} openTicket={openTicket} toast={setToast} />
             : route.view === "issues" ? <Issues key={ws.id} ws={ws} openTicket={openTicket} toast={setToast} />
             : route.view === "rules" ? <Rules key={ws.id} ws={ws} toast={setToast} />
@@ -165,7 +167,7 @@ function App() {
         </main>
       </div>
 
-      {ws && route.ticket && <TicketDrawer key={route.ticket} ws={ws} id={route.ticket} onClose={() => go({ ticket: null })} toast={setToast} />}
+      {route.ticket && <TicketDrawer key={route.ticket} ws={ws} id={route.ticket} onClose={() => go({ ticket: null })} toast={setToast} />}
       <Toast msg={toast} onDone={clear} />
     </div>
   );
