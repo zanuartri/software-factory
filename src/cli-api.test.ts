@@ -129,24 +129,29 @@ test("GET /api/ws/:ws/tickets attaches the latest worker run (harness, model) or
 }, 30000);
 
 /** A fake `herdr` CLI on PATH: a .cmd wrapping a bun script. `agent list` fails when FAKE_HERDR=fail; otherwise the list is empty
- *  until `workspace create` runs (the started.txt marker), then it reports one live claude pane with session s1. */
+ *  until `workspace create` runs (the started.txt marker), then it reports one live claude pane with session s1. The pane's
+ *  agent_status comes from status.txt ("done" when absent) and every `agent send-keys` is appended to keys.log. */
 function fakeHerdr() {
   const dir = mkdtempSync(join(tmpdir(), "factory-herdr-"));
   writeFileSync(join(dir, "fake.ts"), [
-    `import { existsSync, writeFileSync } from "node:fs";`,
+    `import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";`,
     `import { join } from "node:path";`,
     `const marker = join(import.meta.dir, "started.txt");`,
+    `const status = join(import.meta.dir, "status.txt");`,
+    `const keys = join(import.meta.dir, "keys.log");`,
     `const [cmd, sub] = process.argv.slice(2);`,
     `if (cmd === "workspace") { writeFileSync(marker, "1"); console.log(JSON.stringify({ result: { root_pane: { pane_id: "fake-pane" } } })); }`,
     `else if (cmd === "agent" && sub === "list") {`,
     `  if (process.env.FAKE_HERDR === "fail") { console.error("herdr: daemon not running"); process.exit(1); }`,
-    `  const agents = existsSync(marker) ? [{ pane_id: "fake-pane", name: "", agent: "claude", agent_status: "done", cwd: "", agent_session: { value: "s1" } }] : [];`,
+    `  const st = existsSync(status) ? readFileSync(status, "utf8").trim() : "done";`,
+    `  const agents = existsSync(marker) ? [{ pane_id: "fake-pane", name: "", agent: "claude", agent_status: st, cwd: "", agent_session: { value: "s1" } }] : [];`,
     `  console.log(JSON.stringify({ result: { agents } }));`,
     `}`,
+    `else if (cmd === "agent" && sub === "send-keys") appendFileSync(keys, process.argv.slice(5).join(" ") + "\\n");`,
     `else process.exit(0);`,
   ].join("\n") + "\n");
   writeFileSync(join(dir, "herdr.cmd"), `@echo off\r\n"${process.execPath}" "%~dp0fake.ts" %*\r\n`);
-  return { dir, marker: join(dir, "started.txt") };
+  return { dir, marker: join(dir, "started.txt"), status: join(dir, "status.txt"), keys: join(dir, "keys.log") };
 }
 
 /** Spawns daemon.ts against a temp FACTORY_HOME with the fake herdr first on PATH; resolves once its own /health answers. */
@@ -216,3 +221,20 @@ test("no live pane: background tasks clear as done; a started pane reports them 
     expect(live.messages.map((m: any) => [m.tool?.name, m.tool?.status])).toEqual([["Bash", "background"]]);
   } finally { await d.stop(); }
 }, 30000);
+
+test("chat/interrupt: no esc on an idle agent, and two at once send only one esc", async () => {
+  const d = await daemonWithFakeHerdr({});
+  try {
+    const w = await registerRepo(d.post);
+    await d.post(`/api/ws/${w.id}/chat/start`, { resume: false }); // creates the fake pane, so managerAgent finds it
+    const esc = () => (existsSync(d.fake.keys) ? readFileSync(d.fake.keys, "utf8").trim().split("\n").filter(Boolean) : []);
+    const interrupt = () => d.post(`/api/ws/${w.id}/chat/interrupt`, {}).then((r) => r.json());
+    expect(await interrupt()).toEqual({ ok: true, skipped: true }); // the fake pane is "done": esc would open the Rewind menu
+    expect(esc()).toEqual([]);
+    writeFileSync(d.fake.status, "working");
+    const both = await Promise.all([interrupt(), interrupt()]); // two interrupts inside the 1s window
+    expect(both).toEqual(expect.arrayContaining([{ ok: true }, { ok: true, skipped: true }]));
+    expect(esc()).toEqual(["esc"]);
+  } finally { await d.stop(); }
+}, 30000);
+

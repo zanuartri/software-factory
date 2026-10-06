@@ -235,6 +235,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
                   if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && text.slice(1) !== matches[sel].name)) { e.preventDefault(); pick(matches[sel]); return; }
                   if (e.key === "Escape") { e.preventDefault(); setMenuOff(true); return; }
                 }
+                if (e.key === "Escape") { if (st === "working") { e.preventDefault(); act(() => api(`${base}/interrupt`, { method: "POST" })); } return; }
                 if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(text, (e.ctrlKey || e.metaKey) && st === "working"); }
               }}
               className="no-ring block max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[13.5px] leading-relaxed text-fg outline-none placeholder:text-fg-subtle disabled:opacity-50" />
@@ -246,7 +247,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
               <input ref={picker} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = ""; }} />
               <span className="ml-auto" />
               {live && st === "working" && !text.trim() && !files.length
-                ? <button type="button" title="Interrupt (Esc)" aria-label="Interrupt" onClick={() => act(() => api(`${base}/interrupt`, { method: "POST" }))} className="grid size-7 place-items-center rounded-full border border-border text-fg-muted transition-colors hover:bg-hover hover:text-fg"><Square className="size-3 fill-current" /></button>
+                ? <button type="button" title="Interrupt (Esc)" aria-label="Interrupt" disabled={busy} onClick={() => act(() => api(`${base}/interrupt`, { method: "POST" }))} className="grid size-7 place-items-center rounded-full border border-border text-fg-muted transition-colors hover:bg-hover hover:text-fg disabled:opacity-40"><Square className="size-3 fill-current" /></button>
                 : <button type="submit" title={live && st === "working" ? "Queue message (Enter) · Ctrl+Enter interrupts and sends" : "Send"} aria-label="Send" disabled={!live || (!text.trim() && !files.length) || uploading} className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg transition-opacity hover:opacity-90 disabled:opacity-25"><ArrowUp className="size-4" strokeWidth={2.25} /></button>}
             </div>
           </form>

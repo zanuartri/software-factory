@@ -38,6 +38,9 @@ function runDetail(r: Run) {
   return { ...r, token: undefined, dir, decisions: read("decisions.tsv"), report: read("report.md"), transcript_tail: tail, evidence };
 }
 
+// A second interrupt while Claude is still reacting to the first opens the Rewind menu and eats the next prompt, so ignore repeats on the same pane for a beat.
+const lastInterrupt = new Map<string, number>();
+
 // ---- file watcher: humans and the manager edit .factory/*.md directly
 const watchers = new Map<string, ReturnType<typeof watch>>();
 function watchWs(id: string, path: string) {
@@ -135,7 +138,12 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   "/api/ws/:ws/chat/interrupt": {
     POST: async ({ params }) => {
       const w = sup.mustWs(params.ws), agent = await managerAgent(w);
-      if (agent) await herdr.interrupt(agent.pane_id);
+      // Esc on an idle Claude opens the Rewind menu and silently swallows the next prompt, so only send it while it is actually working.
+      if (!agent || agent.agent_status !== "working") return json({ ok: true, skipped: true });
+      const now = Date.now(), last = lastInterrupt.get(agent.pane_id) ?? 0;
+      if (now - last < 1000) return json({ ok: true, skipped: true }); // set before the await so concurrent clicks can't both pass
+      lastInterrupt.set(agent.pane_id, now);
+      await herdr.interrupt(agent.pane_id);
       return json({ ok: true });
     },
   },
