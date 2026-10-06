@@ -159,10 +159,10 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
         {pending && <UserBubble text={pending.text} local={pending.imgs} queued={st === "working"} />}
         {chat?.prompt && <AskCard prompt={chat.prompt} send={answer} busy={busy} />}
         {live && !chat?.prompt && (st === "working" || (activity?.background ?? 0) > 0) && (
-          <div className="flex items-center gap-1.5 truncate text-[12px] text-fg-subtle">
-            <Dot on pulse color="var(--warning)" />
-            <span className="truncate">{st === "working" ? (activity?.running ? `Running ${activity.running.name}${activity.running.detail ? ` · ${activity.running.detail}` : ""}` : "Thinking…") : "Idle"}</span>
-            {(activity?.background ?? 0) > 0 && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-fg-muted">{activity!.background} in background</span>}
+          <div className="flex min-w-0 items-center gap-1.5 text-[12px] text-fg-subtle">
+            <Dot on={st === "working"} pulse color="var(--warning)" />
+            <span className="min-w-0 truncate">{st === "working" ? (activity?.running ? `Running ${activity.running.name}${activity.running.detail ? ` · ${activity.running.detail}` : ""}` : "Thinking…") : "Waiting on background tasks"}</span>
+            {(activity?.background ?? 0) > 0 && <><span aria-hidden className="shrink-0 text-fg-subtle">·</span><span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-fg-muted">{activity!.background} in background</span></>}
           </div>
         )}
         </div>
