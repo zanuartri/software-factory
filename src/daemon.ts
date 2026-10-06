@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { db, emit, getRun, HOME, onEvent, PORT, type Run } from "./db";
+import { pickFolder } from "./folder-pick";
 import * as git from "./git";
 import * as herdr from "./herdr";
 import { handleMcp } from "./mcp";
@@ -12,6 +13,9 @@ import * as sup from "./supervisor";
 const json = (d: unknown, status = 200) => Response.json(d, { status });
 const body = async (req: Request) => (req.headers.get("content-length") === "0" ? {} : req.json().catch(() => ({})));
 const wsPath = (id: string) => sup.mustWs(id).path;
+/** Ticket status → count for the console; a workspace whose repo is gone lists no tickets, so it yields {}. */
+const ticketCounts = (repo: string) =>
+  store.listTickets(repo).reduce<Record<string, number>>((acc, t) => ((acc[t.status] = (acc[t.status] ?? 0) + 1), acc), {});
 
 /** The workspace's manager pane in herdr. Found by session id first; `/clear` gives the pane a new session id, so the herdr name
  *  (set when we start or first see the pane) re-links it and the workspace follows to the new session. */
@@ -52,9 +56,11 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   "/api/shutdown": { POST: () => { sup.shutdownAll(); setTimeout(() => process.exit(0), 300); return json({ ok: true }); } },
 
   "/api/workspaces": {
-    GET: () => json(sup.listWorkspaces().map((w) => ({ ...w, settings: store.loadSettings(w.path), plan: sup.planState(w.id) }))),
+    GET: () => json(sup.listWorkspaces().map((w) => ({ ...w, settings: store.loadSettings(w.path), plan: sup.planState(w.id), counts: ticketCounts(w.path) }))),
     POST: async (req) => { const { path } = await body(req); const w = sup.registerWorkspace(path); watchWs(w.id, w.path); return json(w); },
   },
+  /** Browsers can't hand back an absolute path, so the daemon opens the OS folder dialog on its own machine. */
+  "/api/fs/pick-folder": { POST: async () => json({ path: await pickFolder() }) },
   "/api/ws/:ws": {
     GET: ({ params }) => { const w = sup.mustWs(params.ws); return json({ ...w, settings: store.loadSettings(w.path), rules: store.loadRules(w.path), plan: sup.planState(w.id) }); },
   },
