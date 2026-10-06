@@ -99,8 +99,12 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       const w = sup.mustWs(req.params.ws), agent = await managerAgent(w);
       if (!agent) throw new Error("manager session is not running in herdr — start or resume one");
       const b = await body(req);
-      if (b.interrupt && agent.agent_status === "working") { await herdr.interrupt(agent.pane_id); await Bun.sleep(450); } // steer now: stop the current turn, then send
-      await herdr.prompt(agent.pane_id, b.text, agent.agent_status !== "blocked");
+      if (b.interrupt && agent.agent_status === "working") {
+        await herdr.interrupt(agent.pane_id);
+        await Bun.sleep(450);
+        const fresh = await managerAgent(w);
+        await herdr.prompt(agent.pane_id, b.text, fresh?.agent_status !== "blocked");
+      } else await herdr.prompt(agent.pane_id, b.text, agent.agent_status !== "blocked");
       herdr.noteSent(b.text); // /reload-plugins re-reads the plugin dirs, so the autocomplete must rescan instead of serving the 30s cache
       return json({ ok: true });
     },
@@ -143,6 +147,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       if (!agent || agent.agent_status !== "working") return json({ ok: true, skipped: true });
       const now = Date.now(), last = lastInterrupt.get(agent.pane_id) ?? 0;
       if (now - last < 1000) return json({ ok: true, skipped: true }); // set before the await so concurrent clicks can't both pass
+      for (const [pane, at] of lastInterrupt) if (now - at > 10_000) lastInterrupt.delete(pane);
       lastInterrupt.set(agent.pane_id, now);
       await herdr.interrupt(agent.pane_id);
       return json({ ok: true });

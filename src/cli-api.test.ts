@@ -140,6 +140,7 @@ function fakeHerdr() {
     `import { join } from "node:path";`,
     `const marker = join(import.meta.dir, "started.txt");`,
     `const status = join(import.meta.dir, "status.txt");`,
+    `const nextStatus = join(import.meta.dir, "next-status.txt");`,
     `const keys = join(import.meta.dir, "keys.log");`,
     `const [cmd, sub] = process.argv.slice(2);`,
     `if (cmd === "workspace") { writeFileSync(marker, "1"); console.log(JSON.stringify({ result: { root_pane: { pane_id: "fake-pane" } } })); }`,
@@ -149,7 +150,8 @@ function fakeHerdr() {
     `  const agents = existsSync(marker) ? [{ pane_id: "fake-pane", name: "", agent: "claude", agent_status: st, cwd: "", agent_session: { value: "s1" } }] : [];`,
     `  console.log(JSON.stringify({ result: { agents } }));`,
     `}`,
-    `else if (cmd === "agent" && sub === "send-keys") appendFileSync(keys, process.argv.slice(5).join(" ") + "\\n");`,
+    `else if (cmd === "agent" && sub === "send-keys") { appendFileSync(keys, process.argv.slice(5).join(" ") + "\\n"); if (process.argv[5] === "esc" && existsSync(nextStatus)) writeFileSync(status, readFileSync(nextStatus, "utf8")); }`,
+    `else if (cmd === "agent" && sub === "prompt") appendFileSync(keys, "prompt:" + process.argv.slice(5).join(" ") + "\\n");`,
     `else process.exit(0);`,
   ].join("\n") + "\n");
   writeFileSync(join(dir, "herdr.cmd"), `@echo off\r\n"${process.execPath}" "%~dp0fake.ts" %*\r\n`);
@@ -247,3 +249,22 @@ test("chat/interrupt: no esc on an idle agent, and two at once send only one esc
   } finally { await d.stop(); }
 }, 30000);
 
+test("chat steer uses the post-interrupt status to decide whether to clear", async () => {
+  const d = await daemonWithFakeHerdr({});
+  try {
+    const w = await registerRepo(d.post);
+    await d.post(`/api/ws/${w.id}/chat/start`, { resume: false });
+    const send = (text: string) => d.post(`/api/ws/${w.id}/chat`, { text, interrupt: true });
+    const keys = () => readFileSync(d.fake.keys, "utf8").trim().split("\n");
+    writeFileSync(d.fake.status, "working");
+    writeFileSync(join(d.fake.dir, "next-status.txt"), "blocked");
+    await send("blocked prompt");
+    expect(keys()).toEqual(["esc", "prompt:blocked prompt"]);
+
+    writeFileSync(d.fake.keys, "");
+    writeFileSync(d.fake.status, "working");
+    writeFileSync(join(d.fake.dir, "next-status.txt"), "done");
+    await send("done prompt");
+    expect(keys()).toEqual(["esc", "ctrl+u", "prompt:done prompt"]);
+  } finally { await d.stop(); }
+}, 30000);
