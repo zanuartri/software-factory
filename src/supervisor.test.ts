@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,8 @@ process.env.FACTORY_HOME = mkdtempSync(join(tmpdir(), "factory-test-")); // befo
 const { bashPath, doctor, effectiveQuality, listWorkspaces, ownFault, registerWorkspace, removeWorkspace, scopesOverlap, pickReviewer, pickWorker, reviewerCheck } = await import("./supervisor");
 const { DEFAULT_SETTINGS } = await import("./store");
 const { db, getWs } = await import("./db");
+
+setDefaultTimeout(20000); // the loaded gate runner starves the default 5000ms (whole file ran 35s there vs 0.9s idle)
 
 const mkTicket = (overrides: Partial<Ticket> = {}): Ticket => ({
   id: "T-1", title: "test", status: "open", priority: "p2", tags: [], depends_on: [], scope_paths: [],
@@ -371,6 +373,33 @@ test("removeWorkspace: refuses while a run is active", () => {
     db.query("DELETE FROM runs WHERE id=?").run("r-remove-active"); // once the run is gone, removal goes through
     removeWorkspace(ws.id);
     expect(getWs(ws.id)).toBeNull();
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}, 20000);
+
+test("removeWorkspace: idle/paused leftovers do not block; starting/running/gating do, and run rows stay", () => {
+  const repo = mkdtempSync(join(tmpdir(), "factory-remove-idle-"));
+  Bun.spawnSync(["git", "init", repo]);
+  const insert = (id: string, ws: string, status: string) =>
+    db.query("INSERT INTO runs (id,ws,ticket,role,harness,model,status,phase,token,started_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .run(id, ws, "T-1", "worker", "claude", "sonnet", status, "fix", "tok", Date.now());
+  try {
+    const ws = registerWorkspace(repo);
+    insert("r-remove-idle", ws.id, "idle");
+    insert("r-remove-paused", ws.id, "paused");
+    removeWorkspace(ws.id); // blocked/recovered runs park forever; they must not wedge Remove
+    expect(getWs(ws.id)).toBeNull();
+    expect((db.query("SELECT * FROM runs WHERE ws=?").all(ws.id) as unknown[]).length).toBe(2); // run rows are not deleted
+
+    const again = registerWorkspace(repo);
+    for (const status of ["starting", "running", "gating"]) {
+      insert(`r-remove-${status}`, again.id, status);
+      expect(() => removeWorkspace(again.id)).toThrow("workspace has active runs");
+      db.query("DELETE FROM runs WHERE id=?").run(`r-remove-${status}`);
+    }
+    removeWorkspace(again.id);
+    expect(getWs(again.id)).toBeNull();
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

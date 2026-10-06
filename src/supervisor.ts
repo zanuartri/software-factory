@@ -50,10 +50,12 @@ export function mustWs(ws: string) {
   if (!w) throw new Error(`unknown workspace ${ws}`);
   return w;
 }
-/** Unregister a workspace: refuses while runs are live, stops its plan, drops only the workspaces row (runs/events/asks stay, repo untouched). */
+/** Unregister a workspace: refuses only while a run is really active (starting/running/gating — parked idle/paused leftovers don't block),
+ *  stops its plan, drops only the workspaces row (runs/events/asks stay, repo untouched). */
 export function removeWorkspace(ws: string) {
   const w = mustWs(ws);
-  if (activeRuns(w.id).length) throw new Error("workspace has active runs");
+  const live = db.query("SELECT 1 FROM runs WHERE ws=? AND status IN ('starting','running','gating') LIMIT 1").get(w.id);
+  if (live) throw new Error("workspace has active runs");
   if (planState(w.id)?.active) stopPlan(w.id);
   db.query("DELETE FROM workspaces WHERE id=?").run(w.id);
   emit(w.id, "workspace.removed", { path: w.path });
