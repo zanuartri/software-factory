@@ -105,9 +105,12 @@ export function clearCommandCache() {
 export function noteSent(text: string) {
   if (String(text ?? "").trim().split(/\s+/)[0] === "/reload-plugins") clearCommandCache();
 }
-export function slashCommands(cwd: string, bundled: string | null = bundledSkillsRoot()): SlashCmd[] {
+/** Swappable so a test can count evaluations; the discovery runs only on a cache miss. */
+export const discoverBundled = { get: bundledSkillsRoot };
+export function slashCommands(cwd: string, bundled?: string | null): SlashCmd[] {
   const hit = cmdCache.get(cwd);
   if (hit && Date.now() - hit.at < 30e3) return hit.cmds;
+  const root = bundled === undefined ? discoverBundled.get() : bundled;
   const out: SlashCmd[] = [];
   const home = join(homedir(), ".claude");
   scan(home, "", out);
@@ -116,7 +119,7 @@ export function slashCommands(cwd: string, bundled: string | null = bundledSkill
     const plugins = JSON.parse(readFileSync(join(home, "plugins", "installed_plugins.json"), "utf8")).plugins ?? {};
     for (const [key, installs] of Object.entries<any[]>(plugins)) for (const i of installs) if (i.installPath && existsSync(i.installPath)) scan(i.installPath, `${key.split("@")[0]}:`, out);
   } catch {}
-  if (bundled) scanSkills(bundled, "", out); // bundled skills register without a prefix
+  if (root) scanSkills(root, "", out); // bundled skills register without a prefix
   const seen = new Set<string>();
   const cmds = [...BUILTIN, ...out].filter((c) => !seen.has(c.name) && seen.add(c.name)).sort((a, b) => a.name.localeCompare(b.name));
   cmdCache.set(cwd, { at: Date.now(), cmds });

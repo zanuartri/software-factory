@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bundledSkillsRoot, clearCommandCache, noteSent, prompt, slashCommands } from "./herdr";
+import { bundledSkillsRoot, clearCommandCache, discoverBundled, noteSent, prompt, slashCommands } from "./herdr";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "herdr-cmd-"));
 /** A command file Claude Code would find under <cwd>/.claude/commands. */
@@ -65,6 +65,23 @@ test("clearCommandCache makes slashCommands re-read the command dirs", () => {
   expect(slashCommands(cwd).some((c) => c.name === "t031-fresh")).toBe(false); // still the cached list
   clearCommandCache();
   expect(slashCommands(cwd).find((c) => c.name === "t031-fresh")).toEqual({ name: "t031-fresh", desc: "probe t031-fresh" });
+});
+
+test("a cache hit does not evaluate bundled-skills discovery", () => {
+  const cwd = tmp();
+  let calls = 0;
+  const real = discoverBundled.get;
+  discoverBundled.get = () => { calls++; return null; };
+  try {
+    slashCommands(cwd);
+    slashCommands(cwd); // same cwd, inside the 30s window: the cached list must be returned untouched
+    expect(calls).toBe(1);
+    clearCommandCache();
+    slashCommands(cwd);
+    expect(calls).toBe(2);
+  } finally {
+    discoverBundled.get = real;
+  }
 });
 
 /** Records the argv of every `herdr` invocation and returns a process that prints nothing and exits 0. */
