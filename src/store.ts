@@ -35,14 +35,14 @@ export const DEFAULT_SETTINGS = {
   } as Record<Harness, { enabled: boolean; model: string; models: string[] }>,
   default_harness: "claude" as Harness,
   max_workers: 3,
-  /** true = cost-first catalog routing for workers and reviewers; false = only the models set in settings */
+  /** true = cost-first catalog routing for workers and reviewers; false = worker harness settings and reviewer_order/models */
   cost_routing: false,
-  /** "auto" = cross-family pick (catalog, then reviewer_order); a harness pins every review to it, with `model` (empty = reviewer_models / harness default) */
+  /** "auto" = with cost_routing on, cross-family catalog pick then reviewer_order; off, reviewer_order is used; a harness pins every review to it, with `model` (empty = reviewer_models / harness default) */
   reviewer: { harness: "auto" as Harness | "auto", model: "" },
   reviewer_order: ["omp", "commandcode", "claude"] as Harness[],
   reviewer_models: { claude: "opus", omp: "", commandcode: "" } as Record<Harness, string>,
   verify_cmd: "",
-  /** cost-first routing: keyed "<harness>:<model>"; empty = today's pickHarness/pickReviewer behavior unchanged */
+  /** When cost_routing is on, keyed "<harness>:<model>"; empty = today's pickHarness/pickReviewer behavior unchanged */
   catalog: {} as Record<string, { cost: number; quality: number; family: string; caps?: string[] }>,
   /** claude permission allowlist for workers; the guard hook still vetoes push/force/out-of-scope */
   allowed_tools: ["Bash(git:*)", "Bash(bun:*)", "Bash(npm:*)", "Bash(npx:*)", "Bash(pnpm:*)", "Bash(node:*)", "Bash(ls:*)",

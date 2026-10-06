@@ -169,7 +169,7 @@ export function ownFault(scopePaths: string[], verifyTails: string[], structural
 let pickSeq = 0;
 const lastPicked = new Map<string, number>(); // catalog key → seq, for round-robin among equal-cost ties
 
-/** Cheapest catalog pair that meets the ticket's difficulty (escalated per retry) and tag-driven caps.
+/** When cost_routing is on, choose the cheapest catalog pair meeting the ticket's difficulty (escalated per retry) and tag-driven caps.
  *  Nothing qualifying is no reason to downgrade: with a catalog, the best free pair that satisfies the caps wins;
  *  only an empty catalog (or no free caps-satisfying pair at all) falls back to today's pickHarness + model logic. */
 export function pickWorker(s: store.Settings, t: store.Ticket, running: Run[], attempt = 1): { harness: Harness; model: string } | null {

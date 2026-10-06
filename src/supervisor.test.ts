@@ -287,6 +287,7 @@ test("pickWorker: an unknown difficulty falls back to medium's minimum", () => {
 
 test("pickReviewer: never comes from the worker's harness when the worker isn't a catalog key", () => {
   const s = structuredClone(DEFAULT_SETTINGS);
+  s.cost_routing = true;
   s.catalog = {
     "claude:sonnet": { cost: 5, quality: 4, family: "claude" },
     "claude:opus": { cost: 8, quality: 5, family: "claude" },
