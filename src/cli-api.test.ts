@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -126,4 +126,93 @@ test("GET /api/ws/:ws/tickets attaches the latest worker run (harness, model) or
     await Promise.race([p.exited, Bun.sleep(3000)]);
     p.kill();
   }
+}, 30000);
+
+/** A fake `herdr` CLI on PATH: a .cmd wrapping a bun script. `agent list` fails when FAKE_HERDR=fail; otherwise the list is empty
+ *  until `workspace create` runs (the started.txt marker), then it reports one live claude pane with session s1. */
+function fakeHerdr() {
+  const dir = mkdtempSync(join(tmpdir(), "factory-herdr-"));
+  writeFileSync(join(dir, "fake.ts"), [
+    `import { existsSync, writeFileSync } from "node:fs";`,
+    `import { join } from "node:path";`,
+    `const marker = join(import.meta.dir, "started.txt");`,
+    `const [cmd, sub] = process.argv.slice(2);`,
+    `if (cmd === "workspace") { writeFileSync(marker, "1"); console.log(JSON.stringify({ result: { root_pane: { pane_id: "fake-pane" } } })); }`,
+    `else if (cmd === "agent" && sub === "list") {`,
+    `  if (process.env.FAKE_HERDR === "fail") { console.error("herdr: daemon not running"); process.exit(1); }`,
+    `  const agents = existsSync(marker) ? [{ pane_id: "fake-pane", name: "", agent: "claude", agent_status: "done", cwd: "", agent_session: { value: "s1" } }] : [];`,
+    `  console.log(JSON.stringify({ result: { agents } }));`,
+    `}`,
+    `else process.exit(0);`,
+  ].join("\n") + "\n");
+  writeFileSync(join(dir, "herdr.cmd"), `@echo off\r\n"${process.execPath}" "%~dp0fake.ts" %*\r\n`);
+  return { dir, marker: join(dir, "started.txt") };
+}
+
+/** Spawns daemon.ts against a temp FACTORY_HOME with the fake herdr first on PATH; resolves once its own /health answers. */
+async function daemonWithFakeHerdr(extra: Record<string, string>) {
+  const home = mkdtempSync(join(tmpdir(), "factory-chat-home-")), fake = fakeHerdr();
+  const port = (() => { const l = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); const p = l.port; l.stop(true); return p; })();
+  const p = Bun.spawn(["bun", join(import.meta.dir, "daemon.ts")], {
+    env: { ...process.env, FACTORY_RUN_ID: "test", FACTORY_PORT: String(port), FACTORY_HOME: home, HOME: home, USERPROFILE: home, PATH: `${fake.dir};${process.env.PATH}`, ...extra },
+    stdout: "ignore", stderr: "pipe", windowsHide: true,
+  });
+  const get = (path: string) => fetch(`http://127.0.0.1:${port}${path}`);
+  const post = (path: string, body: unknown) => fetch(`http://127.0.0.1:${port}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  let up = false;
+  for (let i = 0; i < 300 && !up; i++) {
+    up = await get("/health").then((r) => r.json() as Promise<{ pid: number }>).then((h) => h.pid === p.pid, () => false);
+    if (!up) await Bun.sleep(50);
+  }
+  expect(up).toBe(true);
+  const stop = async () => { await post("/api/shutdown", {}).catch(() => {}); await Promise.race([p.exited, Bun.sleep(3000)]); p.kill(); };
+  return { home, fake, get, post, stop };
+}
+
+/** git init + register a temp repo as a workspace; returns its id. */
+async function registerRepo(post: (path: string, body: unknown) => Promise<Response>) {
+  const repo = mkdtempSync(join(tmpdir(), "factory-chat-repo-"));
+  expect(Bun.spawnSync(["git", "init", "-q"], { cwd: repo, stdout: "ignore", stderr: "ignore", windowsHide: true }).exitCode).toBe(0);
+  return (await (await post("/api/workspaces", { path: repo })).json()) as { id: string };
+}
+
+test("a failing herdr is not 'no agent': GET chat 503s and chat/start aborts before startClaude", async () => {
+  const d = await daemonWithFakeHerdr({ FAKE_HERDR: "fail" });
+  try {
+    const w = await registerRepo(d.post);
+    const chat = await d.get(`/api/ws/${w.id}/chat`);
+    expect(chat.status).toBe(503);
+    expect(await chat.json()).toEqual({ error: "herdr unavailable" });
+    expect((await d.get(`/api/ws/${w.id}/chat`)).status).toBe(503); // every poll gets the same answer
+    const start = await d.post(`/api/ws/${w.id}/chat/start`, { resume: false });
+    expect(start.status).toBe(400);
+    expect(((await start.json()) as { error: string }).error).toContain("daemon not running"); // the list error, not a startClaude error
+    expect(existsSync(d.fake.marker)).toBe(false); // startClaude's first act is `workspace create`, which would write the marker
+  } finally { await d.stop(); }
+}, 30000);
+
+test("no live pane: background tasks clear as done; a started pane reports them again", async () => {
+  const d = await daemonWithFakeHerdr({});
+  try {
+    const proj = join(d.home, ".claude", "projects", "p"); // readChat scans ~/.claude/projects for <session>.jsonl
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, "s1.jsonl"), [
+      { type: "assistant", uuid: "a1", message: { role: "assistant", content: [{ type: "tool_use", id: "b1", name: "Bash", input: { command: "sleep 9", run_in_background: true } }] } },
+      { type: "user", uuid: "r1", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "b1", content: "started" }] }, toolUseResult: { backgroundTaskId: "bx1" } },
+    ].map((r) => JSON.stringify(r)).join("\n"));
+    const w = await registerRepo(d.post);
+    await d.post(`/api/ws/${w.id}/attach`, { session: "s1", force: true });
+    const off = (await (await d.get(`/api/ws/${w.id}/chat`)).json()) as any;
+    expect(off.status).toBe("offline");
+    expect(off.activity).toEqual({ running: null, background: 0 });
+    expect(off.messages.map((m: any) => [m.tool?.name, m.tool?.status])).toEqual([["Bash", "done"]]);
+    const start = (await (await d.post(`/api/ws/${w.id}/chat/start`, { resume: false })).json()) as { session: string };
+    expect(start.session).toBe("s1");
+    expect(existsSync(d.fake.marker)).toBe(true); // a pane really was created
+    const live = (await (await d.get(`/api/ws/${w.id}/chat`)).json()) as any;
+    expect(live.status).toBe("done"); // the fake pane's agent_status
+    expect(live.pane).toBe("fake-pane");
+    expect(live.activity).toEqual({ running: null, background: 1 }); // same transcript: the offline mapping copied, never mutated readChat's cache
+    expect(live.messages.map((m: any) => [m.tool?.name, m.tool?.status])).toEqual([["Bash", "background"]]);
+  } finally { await d.stop(); }
 }, 30000);

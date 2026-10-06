@@ -21,9 +21,10 @@ const ticketCounts = (repo: string) =>
  *  (set when we start or first see the pane) re-links it and the workspace follows to the new session. */
 async function managerAgent(w: ReturnType<typeof sup.mustWs>) {
   const name = herdr.agentName(w.id);
-  let a = w.manager ? await herdr.findAgent(w.manager).catch(() => null) : null;
+  // no .catch: a herdr failure must throw (unavailable), never read as "no agent" (absent) — null below means the list worked and found nothing
+  let a = w.manager ? await herdr.findAgent(w.manager) : null;
   if (a) { if (a.name !== name) herdr.nameAgent(a.pane_id, name).catch(() => {}); return a; }
-  a = await herdr.findByName(name).catch(() => null);
+  a = await herdr.findByName(name);
   const sid = a?.agent_session?.value;
   if (a && sid && sid !== w.manager) sup.attachManager(w.id, sid, true);
   return a;
@@ -76,14 +77,19 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   // chat = the manager's Claude session inside herdr: transcript for reading, `herdr agent prompt` for writing
   "/api/ws/:ws/chat": {
     GET: async ({ params }) => {
-      const agent = await managerAgent(sup.mustWs(params.ws));
+      let agent: herdr.HerdrAgent | null = null;
+      try { agent = await managerAgent(sup.mustWs(params.ws)); } catch { return json({ error: "herdr unavailable" }, 503); } // wrap's 400 would read as "offline"; the UI poll swallows the 503 and keeps the last state
       const w = sup.mustWs(params.ws); // re-read: a /clear re-links the workspace to the pane's new session
       if (!w.manager) return json({ session: null, status: "none", messages: [] });
       const { msgs, model, activity, queued } = herdr.readChat(w.manager);
       const screen = agent ? await herdr.readScreen(agent.pane_id) : "";
       const usage = agent ? herdr.usageFrom(screen) : null;
       const prompt = agent ? await herdr.promptFrom(agent.pane_id, screen, agent.agent_status === "blocked") : null;
-      return json({ session: w.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, prompt, activity, queued, messages: msgs });
+      // no pane: nothing will ever deliver the task notifications, so a "background" tool is dead — clear it on copies (readChat caches these objects)
+      const live = !!agent;
+      return json({ session: w.manager, pane: agent?.pane_id ?? null, status: agent?.agent_status ?? "offline", model, usage, prompt,
+        activity: live ? activity : { ...activity, background: 0 }, queued,
+        messages: live ? msgs : msgs.map((m) => (m.tool?.status === "background" ? { ...m, tool: { ...m.tool, status: "done" } } : m)) });
     },
     POST: async (req) => {
       const w = sup.mustWs(req.params.ws), agent = await managerAgent(w);
