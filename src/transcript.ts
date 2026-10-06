@@ -26,6 +26,8 @@ export const transcriptPath = (session: string) => {
 };
 
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+// Reminders/tooling the harness injects into the transcript — never text the user typed.
+const INJECTED = /^<(system-reminder|local-command|command-|task-notification|agent-message|teammate-message|user-prompt-submit-hook)/;
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
 const textOf = (c: unknown): string => (typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("\n") : "");
 const tag = (xml: string, name: string) => xml.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`))?.[1].trim() ?? "";
@@ -64,6 +66,7 @@ export function readChat(session: string, limit = 300): Read {
   const msgs: ChatMsg[] = [];
   let model: string | null = null;
   const byId = new Map<string, ChatMsg>(); // tool_use id → its message, so results and notifications can find it
+  const seen = new Set<string>(); // entry uuids already rendered; resumed/compacted transcripts replay them
   const findTool = (id: string, task?: string) => [...byId.values()].find((m) => m.tool && (m.tool.id === id || (task && m.tool.task === task)))?.tool;
 
   // Text that reached the model: a user message, or an attachment delivered mid-turn (task notifications, queued messages).
@@ -91,7 +94,7 @@ export function readChat(session: string, limit = 300): Read {
       msgs.push({ id: uuid, role: "user", text: `${tag(raw, "command-name")} ${tag(raw, "command-args")}`.trim() });
     } else if (/^\[Request interrupted/.test(raw)) {
       msgs.push({ id: uuid, role: "notice", text: raw, notice: { kind: "command", title: raw.includes("tool use") ? "Interrupted during a tool call" : "Interrupted" } });
-    } else if (!raw.startsWith("<") && !isMeta) msgs.push({ id: uuid, role: "user", text: raw }); // "<…>" = injected reminders
+    } else if (!INJECTED.test(raw.trim()) && !isMeta) msgs.push({ id: uuid, role: "user", text: raw }); // only injected reminders are hidden; "<div>" or "<3" is a real message
   };
 
   const queue: string[] = []; // messages typed while Claude was busy, until they are delivered
@@ -111,8 +114,13 @@ export function readChat(session: string, limit = 300): Read {
       continue;
     }
     if (e.isSidechain || !e.message) continue;
+    if ((e.type === "user" || e.type === "assistant") && e.uuid) { // resumed/compacted sessions replay entries: one row per uuid
+      if (seen.has(e.uuid)) continue;
+      seen.add(e.uuid);
+    }
 
     if (e.type === "user") {
+      if (e.isCompactSummary) continue; // the /compact hand-off summary is not a user message
       const content = e.message.content;
       if (Array.isArray(content)) for (const b of content) if (b.type === "tool_result") {
         const m = byId.get(b.tool_use_id), tur = e.toolUseResult;
@@ -133,7 +141,9 @@ export function readChat(session: string, limit = 300): Read {
           else { t.agent.done = !b.is_error; t.agent.report = out; }
         }
       }
-      const raw = textOf(content).trim();
+      // A leading <system-reminder> block must not swallow the real text next to it: drop injected blocks one by one.
+      const blocks = Array.isArray(content) ? content.filter((b) => b?.type === "text").map((b) => String(b.text ?? "")) : null;
+      const raw = (blocks ? blocks.filter((t) => !INJECTED.test(t.trim())).join("\n") : textOf(content)).trim();
       const images = Array.isArray(content) ? content.filter((b: any) => b.type === "image").length : 0;
       if (raw) note(raw, e.uuid, e.isMeta);
       if (images) { const m = msgs.at(-1); if (raw && m && m.id === e.uuid) m.images = images; else msgs.push({ id: `${e.uuid}:img`, role: "user", text: "", images }); }

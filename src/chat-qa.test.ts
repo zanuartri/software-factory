@@ -133,3 +133,30 @@ test("a pasted image is counted on the user message", () => {
   write("s9", [{ type: "user", uuid: "u1", message: { role: "user", content: [{ type: "text", text: "what is this" }, { type: "image", source: { type: "base64", data: "AAAA" } }] } }]);
   expect(readChat("s9").msgs[0]).toMatchObject({ role: "user", text: "what is this", images: 1 });
 });
+
+test("user text that merely starts with '<' is still a user message", () => {
+  write("s12", [note("u1", "<div>hi</div>"), note("u2", "<3 you")]);
+  expect(readChat("s12").msgs.map((m) => [m.role, m.text])).toEqual([["user", "<div>hi</div>"], ["user", "<3 you"]]);
+});
+
+test("a leading <system-reminder> block is dropped, but the real text beside it survives; a reminder-only entry stays hidden", () => {
+  write("s13", [
+    { type: "user", uuid: "u1", message: { role: "user", content: [{ type: "text", text: "<system-reminder>\nbe nice\n</system-reminder>" }, { type: "text", text: "real text" }] } },
+    { type: "user", uuid: "u2", message: { role: "user", content: [{ type: "text", text: "<system-reminder>\nonly a reminder\n</system-reminder>" }] } },
+    { type: "user", uuid: "u3", message: { role: "user", content: "<system-reminder>string reminder</system-reminder>" } },
+  ]);
+  expect(readChat("s13").msgs.map((m) => [m.role, m.text])).toEqual([["user", "real text"]]);
+});
+
+test("a /compact summary entry produces no row", () => {
+  write("s14", [
+    { type: "user", uuid: "c1", isCompactSummary: true, message: { role: "user", content: "This session is being continued from a previous conversation that ran out of context. Summary: stuff" } },
+    note("u1", "hello"),
+  ]);
+  expect(readChat("s14").msgs.map((m) => [m.role, m.text])).toEqual([["user", "hello"]]);
+});
+
+test("entries repeated after a resume/compaction (same uuid) yield one row each", () => {
+  write("s15", [note("u1", "hello"), note("u1", "hello"), use("t1", "Bash", { command: "ls" }), use("t1", "Bash", { command: "ls" })]);
+  expect(readChat("s15").msgs.map((m) => [m.role, m.text])).toEqual([["user", "hello"], ["tool", "Bash ls"]]);
+});
