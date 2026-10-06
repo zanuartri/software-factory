@@ -9,9 +9,10 @@ export type Verdict = { allow: true } | { allow: false; reason: string };
 const SECRET = /(^|[\\/])(\.env(\..*)?|id_rsa[^\\/]*|\.ssh|\.aws|\.npmrc|auth\.json|credentials(\.json)?|factory\.db)$/i;
 const API_WHY = "the factory daemon API is off-limits from the shell; use the factory tools";
 const API_RE = /FACTORY_URL|\/api\/(ws|runs)\//;
-// read-only source searches may mention daemon strings; any HTTP client in the command voids the exemption
+// read-only source searches may mention daemon strings; an HTTP client, or a second chained command, voids the exemption
 const SEARCH = /\b(?:rg|grep|git\s+grep|git\s+log|findstr|select-string)\b/i;
 const HTTP_CLIENT = /\b(?:curl|wget|invoke-webrequest|iwr|invoke-restmethod|irm)\b|fetch\(|https?\.get|\bnc\s|\bncat\b/i;
+const CHAINED = /[;&|`\n]|\$\(/; // `;` `&&` `||` `|` backtick, newline or `$(` means more than one invocation
 const API_HOSTS = ["127.0.0.1", "localhost", "[::1]", "0.0.0.0", "127.1"];
 const SHELL_DENY: [RegExp, string][] = [
   [/\bgit\s+push\b/, "pushing is done by the factory after review"],
@@ -80,7 +81,7 @@ export function check(tool: string, input: any, ctx: GuardCtx): Verdict {
     for (const [re, why] of SHELL_DENY) if (re.test(cmd)) return deny(why);
     const url = process.env.FACTORY_URL, ports = new Set([process.env.FACTORY_PORT]);
     try { if (url) ports.add(new URL(url).port); } catch {}
-    if (!(SEARCH.test(cmd) && !HTTP_CLIENT.test(cmd))) {
+    if (!(SEARCH.test(cmd) && !CHAINED.test(cmd) && !HTTP_CLIENT.test(cmd))) {
       if (API_RE.test(cmd) || (url && cmd.includes(url))) return deny(API_WHY);
       for (const p of ports) if (p && API_HOSTS.some((h) => cmd.includes(`${h}:${p}`))) return deny(API_WHY);
     }

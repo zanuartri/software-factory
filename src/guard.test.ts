@@ -56,6 +56,28 @@ test("shell can't reach the worker's own daemon API", () => {
   } finally { if (saved === undefined) delete process.env.FACTORY_URL; else process.env.FACTORY_URL = saved; }
 });
 
+test("daemon API guard: the search exemption needs a single unchained invocation", () => {
+  const saved = process.env.FACTORY_URL;
+  process.env.FACTORY_URL = "http://127.0.0.1:4545";
+  try {
+    for (const cmd of [
+      `rg x; python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4545/api/runs/r/guard')"`,
+      `rg x; bun -e "fetch (process.env.FACTORY_URL+'/api/runs/r/guard')"`,
+      `grep -rn x src && curl -X PATCH http://127.0.0.1:4545/api/ws/x/tickets/T-1`,
+      `git log -S x --oneline; wget http://127.0.0.1:4545/api/ws/x`,
+      `rg /api/runs/ src | head`,
+      `rg FACTORY_URL src || bun -e "fetch (process.env.FACTORY_URL)"`,
+    ]) expect(check("Bash", { command: cmd }, ctx).allow).toBe(false);
+    for (const cmd of [
+      "rg FACTORY_URL src",
+      "git grep /api/runs/ -- src",
+      "grep -rn FACTORY_URL src",
+      `rg x; bun test src`, // chained, but mentions no daemon string
+    ])
+      expect(check("Bash", { command: cmd }, ctx).allow).toBe(true);
+  } finally { if (saved === undefined) delete process.env.FACTORY_URL; else process.env.FACTORY_URL = saved; }
+});
+
 test("daemon API guard: path shapes without env, FACTORY_PORT honored", () => {
   const saved = { url: process.env.FACTORY_URL, port: process.env.FACTORY_PORT };
   delete process.env.FACTORY_URL;
