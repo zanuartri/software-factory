@@ -189,12 +189,19 @@ test("a failing herdr is not 'no agent': GET chat 503s and chat/start aborts bef
     const w = await registerRepo(d.post);
     const chat = await d.get(`/api/ws/${w.id}/chat`);
     expect(chat.status).toBe(503);
-    expect(await chat.json()).toEqual({ error: "herdr unavailable" });
+    expect(await chat.json()).toEqual({ error: "herdr unavailable: herdr: daemon not running" });
     expect((await d.get(`/api/ws/${w.id}/chat`)).status).toBe(503); // every poll gets the same answer
     const start = await d.post(`/api/ws/${w.id}/chat/start`, { resume: false });
     expect(start.status).toBe(400);
     expect(((await start.json()) as { error: string }).error).toContain("daemon not running"); // the list error, not a startClaude error
     expect(existsSync(d.fake.marker)).toBe(false); // startClaude's first act is `workspace create`, which would write the marker
+  } finally { await d.stop(); }
+}, 30000);
+test("GET chat for an unknown workspace is a 400", async () => {
+  const d = await daemonWithFakeHerdr({});
+  try {
+    const res = await d.get("/api/ws/not-a-workspace/chat");
+    expect(res.status).toBe(400);
   } finally { await d.stop(); }
 }, 30000);
 
