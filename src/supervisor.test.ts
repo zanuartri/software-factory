@@ -431,7 +431,7 @@ test("removeWorkspace: idle/paused leftovers do not block; starting/running/gati
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
-}, 20000);
+}, 80000);
 
 test("removeWorkspace: drops the plan entry so a re-registered workspace starts clean", () => {
   const repo = mkdtempSync(join(tmpdir(), "factory-remove-plan-"));

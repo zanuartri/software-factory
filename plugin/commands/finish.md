@@ -30,8 +30,7 @@ Final report: a table of tickets (id, status, merged sha, attempts, verdict), is
 decisions you made on the human's behalf, parked issues and questions (with their reasons), and failed/blocked
 tickets with the next step.
 
-This command is meant to run under the built-in `/goal`. If no goal is active, print the exact line to paste:
-
-```
-/goal every ticket is done and no issue is open or triaged (or the round budget is used up, then report what is left)
-```
+This command is self-driving: keep the drain loop going with `factory wait` always in the background, handle each
+event, review and merge, then start the next round until the exit predicate holds or the round/time budget is
+used up. Do not stop to ask the human to set anything up. Optional: running it under the built-in `/goal` only
+keeps the session from stopping early; never print or require a `/goal` line.
