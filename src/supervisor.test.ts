@@ -6,7 +6,7 @@ import type { Ticket } from "./store";
 import type { Harness } from "./db";
 
 process.env.FACTORY_HOME = mkdtempSync(join(tmpdir(), "factory-test-")); // before the db module opens ~/.factory
-const { bashPath, doctor, effectiveQuality, scopesOverlap, pickReviewer, pickWorker, reviewerCheck } = await import("./supervisor");
+const { bashPath, doctor, effectiveQuality, ownFault, scopesOverlap, pickReviewer, pickWorker, reviewerCheck } = await import("./supervisor");
 const { DEFAULT_SETTINGS } = await import("./store");
 const { db } = await import("./db");
 
@@ -17,14 +17,15 @@ const mkTicket = (overrides: Partial<Ticket> = {}): Ticket => ({
 });
 
 let outcomeSeq = 0;
-/** One worker run + one gate event per outcome, so effectiveQuality's join has real rows to read. */
-function gateOutcomes(harness: Harness, model: string, passes: number, fails: number) {
+/** One worker run + one gate event per outcome, so effectiveQuality's join has real rows to read.
+ *  `failData` is the gate.failed payload; the default `{}` mimics rows written before ownFault existed. */
+function gateOutcomes(harness: Harness, model: string, passes: number, fails: number, failData: Record<string, unknown> = {}) {
   for (let i = 0; i < passes + fails; i++) {
     const id = `r-${harness}-${model}-${outcomeSeq++}`;
     db.query("INSERT INTO runs (id,ws,ticket,role,harness,model,status,token,started_at) VALUES (?,?,?,?,?,?,?,?,?)")
       .run(id, "w", "T-1", "worker", harness, model, "done", "tok", Date.now());
     db.query("INSERT INTO events (ws,ticket,run,type,data,ts) VALUES (?,?,?,?,?,?)")
-      .run("w", "T-1", id, i < passes ? "gate.passed" : "gate.failed", "{}", Date.now());
+      .run("w", "T-1", id, i < passes ? "gate.passed" : "gate.failed", JSON.stringify(i < passes ? {} : failData), Date.now());
   }
 }
 
@@ -205,6 +206,39 @@ test("effectiveQuality: neutral blocks do not pad the outcome count", () => {
   gateOutcomes("claude", "stall-neutral-count", 3, 0);
   stallOutcomes("claude", "stall-neutral-count", "ticket.blocked", 3, "worker process exited (code 1)");
   expect(effectiveQuality("claude:stall-neutral-count", 4)).toBe(4); // 3 outcomes, below the >=5 minimum
+});
+
+test("ownFault: a verify failure naming an in-scope file is the worker's fault", () => {
+  expect(ownFault(["src/supervisor.ts"], ["src/supervisor.ts:129:1 - error TS2322: Type 'x' is not assignable"], false)).toBe(true);
+  expect(ownFault(["src/**"], ["src\\a.ts(3,5): error TS1005: ';' expected"], false)).toBe(true);
+});
+
+test("ownFault: a verify failure that names no in-scope file is not the worker's fault", () => {
+  expect(ownFault(["src/supervisor.ts"], ["execvpe(/bin/bash) failed: No such file or directory"], false)).toBe(false);
+  expect(ownFault(["src/supervisor.ts"], ["test/cli-wait.test.ts timed out after 20s"], false)).toBe(false);
+});
+
+test("ownFault: structural or reviewer findings are the worker's fault even with a clean verify log", () => {
+  expect(ownFault(["src/supervisor.ts"], [""], true)).toBe(true);
+  expect(ownFault([], [], true)).toBe(true);
+});
+
+test("effectiveQuality: gate failures outside the worker's scope keep the base", () => {
+  gateOutcomes("claude", "infra-fails", 2, 0);
+  gateOutcomes("claude", "infra-fails", 0, 4, { ownFault: false, findings: ["Verify failed: `bun test` exited 1"] });
+  expect(effectiveQuality("claude:infra-fails", 4)).toBe(4); // only the 2 passes count, below the >=5 minimum
+});
+
+test("effectiveQuality: the same counts with ownFault:true still demote", () => {
+  gateOutcomes("claude", "own-fails", 2, 0);
+  gateOutcomes("claude", "own-fails", 0, 4, { ownFault: true, findings: ["Verify failed: `bun test` exited 1"] });
+  expect(effectiveQuality("claude:own-fails", 4)).toBe(3); // 2/6 = 33%
+});
+
+test("effectiveQuality: legacy gate.failed rows without ownFault still count", () => {
+  gateOutcomes("claude", "legacy-fails", 2, 3); // pre-ownFault payloads: data "{}"
+  gateOutcomes("claude", "legacy-fails", 0, 5, { ownFault: false });
+  expect(effectiveQuality("claude:legacy-fails", 4)).toBe(3); // 2/5 = 40%
 });
 
 test("pickWorker: a demoted pair loses to the next-cheapest qualifying pair", () => {

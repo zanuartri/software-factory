@@ -122,14 +122,16 @@ const qualityCache = new Map<string, { passes: number; total: number; at: number
 const clearQualityCache = () => qualityCache.clear();
 
 /** Last 30 quality outcomes (worker runs only, all workspaces) for one catalog pair, cached ~60s / per pass.
- *  Stalls count as failures: a timebox, or a "stopped twice without factory_submit" block. Other blocked reasons stay neutral. */
+ *  Stalls count as failures: a timebox, or a "stopped twice without factory_submit" block. Other blocked reasons stay neutral.
+ *  A gate.failed counts only when it was the worker's fault (`ownFault`); rows written before that field existed still count. */
 function gateRecord(key: string) {
   const hit = qualityCache.get(key);
   if (hit && Date.now() - hit.at < QUALITY_TTL) return hit;
   const i = key.indexOf(":");
   const rows = db.query(
     `SELECT e.type AS type FROM events e JOIN runs r ON r.id=e.run
-     WHERE (e.type IN ('gate.passed','gate.failed','run.timebox') OR (e.type='ticket.blocked' AND e.data LIKE '%without factory_submit%'))
+     WHERE (e.type IN ('gate.passed','run.timebox') OR (e.type='gate.failed' AND json_extract(e.data,'$.ownFault') IS NOT 0)
+       OR (e.type='ticket.blocked' AND e.data LIKE '%without factory_submit%'))
        AND r.role='worker' AND r.harness=? AND r.model=? ORDER BY e.id DESC LIMIT 30`,
   ).all(key.slice(0, i), key.slice(i + 1)) as { type: string }[];
   const rec = { passes: rows.filter((r) => r.type === "gate.passed").length, total: rows.length, at: Date.now() };
@@ -141,6 +143,15 @@ function gateRecord(key: string) {
 export function effectiveQuality(key: string, base: number): number {
   const { passes, total } = gateRecord(key);
   return total >= 5 && passes / total < 0.6 ? Math.max(1, base - 1) : base;
+}
+
+const PATH_TOKEN = /[\w./\\-]+\.\w+/g;
+
+/** A gate failure demotes the pair only when the worker could have caused it: structural/reviewer findings always could,
+ *  a failing verify counts only if its log tail names a file inside the ticket's scope (flaky timing and infra errors don't). */
+export function ownFault(scopePaths: string[], verifyTails: string[], structuralOrReviewer: boolean): boolean {
+  if (structuralOrReviewer) return true;
+  return verifyTails.some((log) => (log.match(PATH_TOKEN) ?? []).some((tok) => inScope(tok.replace(/\\/g, "/"), scopePaths)));
 }
 
 let pickSeq = 0;
@@ -497,11 +508,16 @@ async function gate(workerRunId: string, report: string) {
 
   // 2. independent verify
   let verifyLog = "";
+  const verifyTails: string[] = [];
   for (const [i, cmd] of store.verifyCommands(t).entries()) {
     const res = await sh(cmd, r.worktree!);
     writeFileSync(join(dir, `verify-${i + 1}.log`), `$ ${cmd}\nexit ${res.code}\n\n${res.output}`);
     verifyLog += `- \`${cmd}\` → exit ${res.code}${res.code ? `\n\`\`\`\n${res.output.slice(-3000)}\n\`\`\`` : ""}\n`;
-    if (res.code !== 0) findings.push(`Verify failed: \`${cmd}\` exited ${res.code}. Log tail:\n\`\`\`\n${res.output.slice(-3000)}\n\`\`\``);
+    if (res.code !== 0) {
+      const tail = res.output.slice(-3000);
+      verifyTails.push(tail);
+      findings.push(`Verify failed: \`${cmd}\` exited ${res.code}. Log tail:\n\`\`\`\n${tail}\n\`\`\``);
+    }
   }
   emit(r.ws, "gate.verify", { ok: !findings.length, log: verifyLog }, meta);
 
@@ -523,7 +539,9 @@ async function gate(workerRunId: string, report: string) {
     return;
   }
   writeFileSync(join(dir, "findings.md"), findings.join("\n\n"));
-  emit(r.ws, "gate.failed", { attempt: r.attempt, findings }, meta);
+  // keep the pair's quality record free of failures the ticket's own files cannot explain (infra, flaky timing)
+  const atFault = ownFault(t.scope_paths, verifyTails, !structuralOk || verdict?.verdict === "FAIL");
+  emit(r.ws, "gate.failed", { attempt: r.attempt, findings, ownFault: atFault }, meta);
   if (r.attempt >= s.max_attempts) {
     store.updateTicket(w.path, t.id, { sections: { Report: `${report}\n\n${gateMd}\n\n#### Unresolved findings\n${findings.join("\n\n")}` } } as any);
     return finishRun(r.id, "failed", `gate failed ${r.attempt}x`);
