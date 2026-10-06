@@ -77,6 +77,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       const b = await body(req);
       if (b.interrupt && agent.agent_status === "working") { await herdr.interrupt(agent.pane_id); await Bun.sleep(450); } // steer now: stop the current turn, then send
       await herdr.prompt(agent.pane_id, b.text);
+      herdr.noteSent(b.text); // /reload-plugins re-reads the plugin dirs, so the autocomplete must rescan instead of serving the 30s cache
       return json({ ok: true });
     },
   },

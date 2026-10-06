@@ -53,6 +53,16 @@ const BUILTIN: SlashCmd[] = [
   ["context", "Show context usage"], ["cost", "Show session cost"], ["resume", "Resume a past session"], ["init", "Create a CLAUDE.md"], ["memory", "Edit memory files"],
   ["permissions", "Manage tool permissions"], ["mcp", "Manage MCP servers"], ["agents", "Manage subagents"], ["plugin", "Manage plugins"], ["config", "Open settings"],
   ["status", "Show session status"], ["help", "Show help"], ["rewind", "Rewind the conversation"], ["export", "Export the conversation"], ["review", "Review a pull request"],
+  ["goal", "Keep working until a condition is met"], ["loop", "Run a prompt repeatedly on an interval"], ["plan", "Enter plan mode"], ["fast", "Toggle fast mode"],
+  ["usage", "Show cost, plan limits and activity"],
+  ["remote-control", "Control this session from another device"], ["reload-plugins", "Reload plugins to apply pending changes"], ["reload-skills", "Re-scan skills and commands"],
+  ["add-dir", "Add a working directory for file access"], ["cd", "Move the session to another directory"], ["diff", "Show the changes in the working tree"],
+  ["code-review", "Review the current diff for bugs"], ["security-review", "Review the diff for security issues"], ["doctor", "Run a setup checkup"], ["skills", "List available skills"],
+  ["hooks", "View hook configurations"], ["tasks", "View and manage background work"], ["rename", "Rename the current session"], ["output-style", "Switch output style"],
+  ["statusline", "Configure the status line"], ["theme", "Change the color theme"], ["sandbox", "Toggle sandbox mode"], ["ide", "Manage IDE integrations"],
+  ["login", "Sign in to your Anthropic account"], ["logout", "Sign out of your Anthropic account"], ["exit", "Exit the CLI"],
+  ["branch", "Branch the conversation to try another direction"], ["fork", "Copy the conversation into a background session"], ["btw", "Ask a side question without adding to the conversation"],
+  ["bug", "Report a bug with session context"], ["verify", "Build and run the app to confirm a change"], ["workflows", "Watch running workflows"],
 ].map(([name, desc]) => ({ name, desc }));
 
 const frontDesc = (f: string) => readFileSync(f, "utf8").match(/^description:\s*(.+)$/m)?.[1].replace(/^["']|["']$/g, "").slice(0, 140) ?? "";
@@ -71,6 +81,14 @@ function scan(root: string, prefix: string, out: SlashCmd[]) {
   }
 }
 const cmdCache = new Map<string, { at: number; cmds: SlashCmd[] }>();
+/** Drop every per-cwd list so the next slashCommands() rescans the plugin/command dirs. */
+export function clearCommandCache() {
+  cmdCache.clear();
+}
+/** Called with the raw text sent to a pane: `/reload-plugins` (any args) reloads the plugins, so the menu must not serve the 30s-old list. */
+export function noteSent(text: string) {
+  if (String(text ?? "").trim().split(/\s+/)[0] === "/reload-plugins") clearCommandCache();
+}
 export function slashCommands(cwd: string): SlashCmd[] {
   const hit = cmdCache.get(cwd);
   if (hit && Date.now() - hit.at < 30e3) return hit.cmds;
