@@ -8,7 +8,7 @@ const ISSUE_TONE: Record<string, "warning" | "accent" | "neutral" | "success"> =
 
 export function Issues({ ws, openTicket, toast }: { ws: Workspace; openTicket: (id: string) => void; toast: (m: string) => void }) {
   const issues = useApi<Issue[]>(`/api/ws/${ws.id}/issues`, (e: FEvent) => e.ws === ws.id && /issue|store/.test(e.type));
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("open");
   const [sel, setSel] = useState<string | null>(null);
   const all = issues.data ?? [];
   const list = all.filter((i) => filter === "all" || i.status === filter);
