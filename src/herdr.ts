@@ -1,6 +1,6 @@
 // Thin wrapper over the `herdr` CLI: the web chat drives the manager's Claude session that lives in a herdr pane.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 export type HerdrAgent = { pane_id: string; name?: string; agent: string; agent_status: string; cwd: string; agent_session?: { value?: string } };
@@ -62,12 +62,12 @@ const BUILTIN: SlashCmd[] = [
   ["statusline", "Configure the status line"], ["theme", "Change the color theme"], ["sandbox", "Toggle sandbox mode"], ["ide", "Manage IDE integrations"],
   ["login", "Sign in to your Anthropic account"], ["logout", "Sign out of your Anthropic account"], ["exit", "Exit the CLI"],
   ["branch", "Branch the conversation to try another direction"], ["fork", "Copy the conversation into a background session"], ["btw", "Ask a side question without adding to the conversation"],
-  ["bug", "Report a bug with session context"], ["workflows", "Watch running workflows"],
+  ["bug", "Report a bug with session context"], ["workflows", "Watch running workflows"], ["feedback", "Send feedback about Claude Code"],
 ].map(([name, desc]) => ({ name, desc }));
 
 const frontDesc = (f: string) => readFileSync(f, "utf8").match(/^description:\s*(.+)$/m)?.[1].replace(/^["']|["']$/g, "").slice(0, 140) ?? "";
 function scan(root: string, prefix: string, out: SlashCmd[]) {
-  const cmds = join(root, "commands"), skills = join(root, "skills");
+  const cmds = join(root, "commands");
   const walk = (dir: string, ns: string) => { // commands/a/b.md → a:b
     for (const e of existsSync(dir) ? readdirSync(dir, { withFileTypes: true }) : []) {
       if (e.isDirectory()) walk(join(dir, e.name), `${ns}${e.name}:`);
@@ -75,10 +75,22 @@ function scan(root: string, prefix: string, out: SlashCmd[]) {
     }
   };
   walk(cmds, "");
+  scanSkills(join(root, "skills"), prefix, out);
+}
+/** A skills dir: children `<name>/SKILL.md` with a frontmatter description. */
+function scanSkills(skills: string, prefix: string, out: SlashCmd[]) {
   for (const e of existsSync(skills) ? readdirSync(skills, { withFileTypes: true }) : []) {
     const f = join(skills, e.name, "SKILL.md");
     if (existsSync(f)) out.push({ name: `${prefix}${e.name}`, desc: frontDesc(f) });
   }
+}
+/** Newest tmpdir/claude/bundled-skills/<randomBytes-hex> dir — where Claude Code extracts its bundled skills — or null when it never ran here. */
+export function bundledSkillsRoot(base = join(tmpdir(), "claude", "bundled-skills")): string | null {
+  const dirs = (existsSync(base) ? readdirSync(base, { withFileTypes: true }) : [])
+    .filter((e) => e.isDirectory() && /^[0-9a-f]+$/.test(e.name))
+    .map((e) => join(base, e.name))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  return dirs[0] ?? null;
 }
 const cmdCache = new Map<string, { at: number; cmds: SlashCmd[] }>();
 /** Drop every per-cwd list so the next slashCommands() rescans the plugin/command dirs. */
@@ -89,7 +101,7 @@ export function clearCommandCache() {
 export function noteSent(text: string) {
   if (String(text ?? "").trim().split(/\s+/)[0] === "/reload-plugins") clearCommandCache();
 }
-export function slashCommands(cwd: string): SlashCmd[] {
+export function slashCommands(cwd: string, bundled: string | null = bundledSkillsRoot()): SlashCmd[] {
   const hit = cmdCache.get(cwd);
   if (hit && Date.now() - hit.at < 30e3) return hit.cmds;
   const out: SlashCmd[] = [];
@@ -100,6 +112,7 @@ export function slashCommands(cwd: string): SlashCmd[] {
     const plugins = JSON.parse(readFileSync(join(home, "plugins", "installed_plugins.json"), "utf8")).plugins ?? {};
     for (const [key, installs] of Object.entries<any[]>(plugins)) for (const i of installs) if (i.installPath && existsSync(i.installPath)) scan(i.installPath, `${key.split("@")[0]}:`, out);
   } catch {}
+  if (bundled) scanSkills(bundled, "", out); // bundled skills register without a prefix
   const seen = new Set<string>();
   const cmds = [...BUILTIN, ...out].filter((c) => !seen.has(c.name) && seen.add(c.name)).sort((a, b) => a.name.localeCompare(b.name));
   cmdCache.set(cwd, { at: Date.now(), cmds });

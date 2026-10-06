@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearCommandCache, noteSent, slashCommands } from "./herdr";
+import { bundledSkillsRoot, clearCommandCache, noteSent, slashCommands } from "./herdr";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "herdr-cmd-"));
 /** A command file Claude Code would find under <cwd>/.claude/commands. */
@@ -13,9 +13,10 @@ function addCommand(cwd: string, name: string) {
 }
 
 test("slashCommands lists the built-ins the menu was missing", () => {
-  const missing = new Set(["reload-plugins", "goal", "remote-control", "fast", "loop", "usage"]);
+  const missing = new Set(["reload-plugins", "goal", "remote-control", "fast", "feedback", "loop", "usage"]);
   expect(slashCommands(tmp()).filter((c) => missing.has(c.name))).toEqual([
     { name: "fast", desc: "Toggle fast mode" },
+    { name: "feedback", desc: "Send feedback about Claude Code" },
     { name: "goal", desc: "Keep working until a condition is met" },
     { name: "loop", desc: "Run a prompt repeatedly on an interval" },
     { name: "reload-plugins", desc: "Reload plugins to apply pending changes" },
@@ -24,17 +25,31 @@ test("slashCommands lists the built-ins the menu was missing", () => {
   ]);
 });
 
-test("slashCommands drops verify (a bundled skill) and keeps the confirmed built-in commands", () => {
+test("slashCommands keeps the confirmed built-in commands when no bundled root exists", () => {
   const desc: Record<string, string> = {};
-  for (const c of slashCommands(tmp())) desc[c.name] = c.desc;
-  expect(desc.verify).toBeUndefined(); // /verify is a bundled skill in Claude Code, not a built-in command
-  expect(["branch", "btw", "bug", "fork", "workflows"].map((n) => desc[n])).toEqual([
-    "Branch the conversation to try another direction",
-    "Ask a side question without adding to the conversation",
-    "Report a bug with session context",
-    "Copy the conversation into a background session",
-    "Watch running workflows",
-  ]);
+  for (const c of slashCommands(tmp(), null)) desc[c.name] = c.desc;
+  expect(desc.verify).toBeUndefined(); // /verify only comes from the bundled-skills dir
+  for (const n of ["branch", "btw", "bug", "fork", "workflows"]) expect(desc[n]).toBeDefined();
+});
+
+test("slashCommands lists skills from an injected bundled-skills dir", () => {
+  const root = join(tmp(), "claude", "bundled-skills", "0123456789abcdef0123456789abcdef");
+  mkdirSync(join(root, "verify"), { recursive: true });
+  writeFileSync(join(root, "verify", "SKILL.md"), "---\ndescription: Run every Verify command\n---\n\nbody\n");
+  expect(slashCommands(tmp(), root).find((c) => c.name === "verify")).toEqual({ name: "verify", desc: "Run every Verify command" });
+});
+
+test("bundledSkillsRoot picks the newest hex dir and nulls when absent", () => {
+  const base = join(tmp(), "claude", "bundled-skills");
+  const oldHex = join(base, "0123456789abcdef0123456789abcdef");
+  const newHex = join(base, "fedcba9876543210fedcba9876543210");
+  mkdirSync(oldHex, { recursive: true });
+  mkdirSync(newHex, { recursive: true });
+  mkdirSync(join(base, "not-hex"), { recursive: true });
+  const past = new Date(Date.now() - 60_000);
+  utimesSync(oldHex, past, past);
+  expect(bundledSkillsRoot(base)).toBe(newHex);
+  expect(bundledSkillsRoot(join(tmp(), "no-bundled-here"))).toBeNull();
 });
 
 test("slashCommands has no duplicate names and stays sorted", () => {
