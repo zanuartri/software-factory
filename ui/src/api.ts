@@ -6,7 +6,11 @@ export type Ticket = {
   tags: string[]; depends_on: string[]; scope_paths: string[]; harness: Harness | "any"; model: string;
   blocked?: string | null; failed?: string | null; issue?: string | null; branch?: string | null; attempts?: number;
   sections: Record<string, string>; brief_errors: string[]; runs?: Run[];
+  /** latest worker run (daemon-attached); what a harness:any ticket actually ran on */
+  run?: { harness: Harness; model: string | null } | null;
 };
+/** HarnessTag props: a harness:any ticket that has run shows the real harness/model; a pinned one keeps its pin (with `model` if given). */
+export const harnessOf = (t: Ticket, model?: string | null) => t.harness === "any" && t.run ? { h: t.run.harness, model: t.run.model } : { h: t.harness, model };
 export type Run = {
   id: string; ws: string; ticket: string; role: "worker" | "reviewer"; harness: Harness; model: string | null;
   status: string; phase: string | null; attempt: number; summary: string | null; tokens: number; parent: string | null;

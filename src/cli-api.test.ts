@@ -1,5 +1,6 @@
+import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -88,4 +89,41 @@ test("a typed \n inside a flag value is a line break (shells keep it literal)", 
   const r = await viaStub(["ticket", "new", "--title", "t", "--acceptance", "one\ntwo"], () => Response.json({ id: "T-9", file: "f", brief_errors: [] }));
   const post = r.seen.find((s) => s.method === "POST" && s.path.endsWith("/tickets"))!.body;
   expect(post.sections.Acceptance).toBe("- [ ] one\n- [ ] two");
+}, 30000);
+
+test("GET /api/ws/:ws/tickets attaches the latest worker run (harness, model) or null", async () => {
+  const home = mkdtempSync(join(tmpdir(), "factory-runs-home-")), repo = mkdtempSync(join(tmpdir(), "factory-runs-repo-"));
+  const tickets = join(repo, ".factory", "tickets");
+  mkdirSync(tickets, { recursive: true });
+  for (const id of ["T-001", "T-002", "T-003"]) writeFileSync(join(tickets, `${id}-x.md`), `---\nid: ${id}\ntitle: x\nstatus: open\npriority: p2\n---\n\n## Goal\nG\n`);
+  expect(Bun.spawnSync(["git", "init", "-q"], { cwd: repo, stdout: "ignore", stderr: "ignore", windowsHide: true }).exitCode).toBe(0);
+  const port = (() => { const l = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); const p = l.port; l.stop(true); return p; })();
+  const p = Bun.spawn(["bun", join(import.meta.dir, "daemon.ts")], { env: { ...process.env, FACTORY_PORT: String(port), FACTORY_HOME: home }, stdout: "ignore", stderr: "pipe", windowsHide: true });
+  const get = (path: string) => fetch(`http://127.0.0.1:${port}${path}`);
+  try {
+    let up = false;
+    for (let i = 0; i < 300 && !up; i++) {
+      up = await get("/health").then((r) => r.json() as Promise<{ pid: number }>).then((h) => h.pid === p.pid, () => false);
+      if (!up) await Bun.sleep(50);
+    }
+    expect(up).toBe(true);
+    const w = (await (await fetch(`http://127.0.0.1:${port}/api/workspaces`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: repo }) })).json()) as { id: string };
+    const seeded = new Database(join(home, "factory.db")); // own connection: importing ./db here would clash with the suites that share this process
+    const run = (id: string, ws: string, ticket: string, role: string, harness: string, model: string | null, at: number) =>
+      seeded.query("INSERT INTO runs (id,ws,ticket,role,harness,model,status,token,started_at) VALUES (?,?,?,?,?,?,?,?,?)").run(id, ws, ticket, role, harness, model, "done", "tok", at);
+    run("r1", w.id, "T-001", "worker", "claude", "sonnet", 100);
+    run("r2", w.id, "T-001", "worker", "omp", null, 200); // the retry on another harness is the one shown
+    run("r3", w.id, "T-001", "reviewer", "commandcode", "x", 300); // a later reviewer run never counts
+    run("r4", w.id, "T-002", "reviewer", "claude", "opus", 100); // reviewer only: no worker run
+    run("r5", "other", "T-003", "worker", "claude", "haiku", 100); // another workspace
+    seeded.close();
+    const list = (await (await get(`/api/ws/${w.id}/tickets`)).json()) as { id: string; run: unknown }[];
+    expect(Object.fromEntries(list.map((t) => [t.id, t.run]))).toEqual({ "T-001": { harness: "omp", model: null }, "T-002": null, "T-003": null });
+    const one = async (id: string) => ((await (await get(`/api/ws/${w.id}/tickets/${id}`)).json()) as { run: unknown }).run;
+    expect([await one("T-001"), await one("T-002")]).toEqual([{ harness: "omp", model: null }, null]);
+  } finally {
+    await fetch(`http://127.0.0.1:${port}/api/shutdown`, { method: "POST" }).catch(() => {});
+    await Promise.race([p.exited, Bun.sleep(3000)]);
+    p.kill();
+  }
 }, 30000);

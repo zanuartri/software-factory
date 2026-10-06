@@ -1,6 +1,6 @@
 import { ArrowUp, GitMerge, Pencil, Play, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { ago, api, LIVE, useApi, type FEvent, type Run, type Ticket, type Workspace } from "./api";
+import { ago, api, harnessOf, LIVE, useApi, type FEvent, type Run, type Ticket, type Workspace } from "./api";
 import { modelOpts, Select, type Opt } from "./select";
 import { Btn, Dot, Empty, HARNESS_COLOR, HarnessTag, inputCls, Md, STATUS_META, StatusChip, StatusIcon, textareaCls } from "./ui";
 
@@ -45,7 +45,7 @@ export function TicketDrawer({ ws, id, onClose, toast }: { ws: Workspace; id: st
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <Select variant="ghost" ariaLabel="status" value={d.status} options={STATUS_OPTS}
                   onChange={(v) => act(api(`/api/ws/${ws.id}/tickets/${id}`, { method: "PATCH", body: { status: v } }))} />
-                <HarnessTag h={d.harness} model={d.model} />
+                <HarnessTag {...harnessOf(d, d.model)} />
                 <StatusChip t={d} />
                 <div className="ml-auto flex gap-2">
                   {(d.blocked || d.failed) && <Btn onClick={() => act(api(`/api/ws/${ws.id}/tickets/${id}`, { method: "PATCH", body: { blocked: null, failed: null } }))}>Clear flag</Btn>}
@@ -97,7 +97,7 @@ function Brief({ ws, t, onSaved, toast }: { ws: Workspace; t: Ticket; onSaved: (
   const hc = ws.settings.harnesses[t.harness === "any" ? ws.settings.default_harness : t.harness];
   const props: [string, React.ReactNode][] = [
     ["Priority", PRIORITY_LABEL[t.priority] ?? t.priority],
-    ["Harness", <HarnessTag h={t.harness} />],
+    ["Harness", <HarnessTag {...harnessOf(t)} />],
     ["Model", t.model !== "default" ? t.model : <span className="text-fg-muted">{hc?.model ? <>{hc.model} <span className="text-fg-subtle">· settings default</span></> : "Harness default"}</span>],
     ["Scope", <span className="font-mono text-[12px]">{t.scope_paths.join(", ") || "—"}</span>],
     ["Tags", t.tags.join(", ") || "—"],

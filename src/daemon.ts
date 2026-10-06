@@ -158,7 +158,10 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   },
 
   "/api/ws/:ws/tickets": {
-    GET: ({ params }) => json(store.listTickets(wsPath(params.ws)).map((t) => ({ ...t, brief_errors: store.validateBrief(t) }))),
+    GET: ({ params }) => {
+      const last = new Map((db.query("SELECT ticket, harness, model FROM runs WHERE ws=? AND role='worker' ORDER BY started_at, rowid").all(params.ws) as { ticket: string; harness: string; model: string | null }[]).map((r) => [r.ticket, { harness: r.harness, model: r.model }]));
+      return json(store.listTickets(wsPath(params.ws)).map((t) => ({ ...t, brief_errors: store.validateBrief(t), run: last.get(t.id) ?? null })));
+    },
     POST: async (req) => { const t = store.createTicket(wsPath(req.params.ws), await body(req)); emit(req.params.ws, "ticket.created", { id: t.id }, { ticket: t.id }); return json({ ...t, brief_errors: store.validateBrief(t) }); },
   },
   "/api/ws/:ws/tickets/:id": {
@@ -166,7 +169,8 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       const p = wsPath(params.ws), t = store.getTicket(p, params.id);
       if (!t) return json({ error: "not found" }, 404);
       const runs = db.query("SELECT * FROM runs WHERE ws=? AND ticket=? ORDER BY started_at DESC").all(params.ws, params.id) as Run[];
-      return json({ ...t, brief_errors: store.validateBrief(t), runs: runs.map((r) => ({ ...r, token: undefined })) });
+      const w = runs.find((r) => r.role === "worker"); // runs are newest-first
+      return json({ ...t, brief_errors: store.validateBrief(t), run: w ? { harness: w.harness, model: w.model } : null, runs: runs.map((r) => ({ ...r, token: undefined })) });
     },
     PATCH: async (req) => {
       const p = wsPath(req.params.ws), patch = await body(req), cur = store.getTicket(p, req.params.id);

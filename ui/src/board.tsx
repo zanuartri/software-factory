@@ -1,6 +1,6 @@
 import { ChevronRight, Kanban, List, Search } from "lucide-react";
 import { useState } from "react";
-import { api, useApi, type FEvent, type Ticket, type Workspace } from "./api";
+import { api, harnessOf, useApi, type FEvent, type Ticket, type Workspace } from "./api";
 import { HarnessTag, PageHeader, STATUS_META, StatusChip, StatusIcon } from "./ui";
 
 const COLS = ["draft", "open", "in_progress", "in_review", "done"] as const;
@@ -34,7 +34,7 @@ export function Board({ ws, openTicket, toast }: { ws: Workspace; openTicket: (i
 
   const all = tickets.data ?? [];
   const needle = q.trim().toLowerCase();
-  const shown = all.filter((t) => !needle || `${t.id} ${t.title} ${t.tags.join(" ")} ${t.harness}`.toLowerCase().includes(needle));
+  const shown = all.filter((t) => !needle || `${t.id} ${t.title} ${t.tags.join(" ")} ${t.harness} ${t.run?.harness ?? ""}`.toLowerCase().includes(needle));
   const move = async (id: string, status: string) => {
     try { await api(`/api/ws/${ws.id}/tickets/${id}`, { method: "PATCH", body: { status } }); tickets.reload(); }
     catch (e: any) { toast(`Can't move ${id} to ${STATUS_META[status].label}: ${e.message}${e.data?.brief_errors ? "\n• " + e.data.brief_errors.join("\n• ") : ""}`); }
@@ -85,7 +85,7 @@ export function Board({ ws, openTicket, toast }: { ws: Workspace; openTicket: (i
                       <p className="line-clamp-3 text-[13px] leading-snug font-medium">{t.title}</p>
                       <div className="mt-2.5 flex items-center gap-2 text-[11.5px] text-fg-subtle">
                         <span className="font-mono">{t.id}</span>
-                        <HarnessTag h={t.harness} />
+                        <HarnessTag {...harnessOf(t)} />
                         <span className="ml-auto flex items-center gap-2"><StatusChip t={t} /><Priority p={t.priority} /></span>
                       </div>
                       {(t.tags.length > 0 || t.depends_on.length > 0 || (t.attempts ?? 0) > 1 || gaps(t)) && (
@@ -139,7 +139,7 @@ function ListView({ tickets, over, dropProps, openTicket }: { tickets: Ticket[];
                 {(t.attempts ?? 0) > 1 && <span className="text-[11px] text-warning">attempt {t.attempts}</span>}
                 {t.depends_on.length > 0 && <span className="hidden text-[11px] text-fg-subtle xl:inline">after {t.depends_on.join(", ")}</span>}
                 <span className="hidden items-center gap-1 lg:flex">{t.tags.map((g) => <Tag key={g}>{g}</Tag>)}</span>
-                <HarnessTag h={t.harness} />
+                <HarnessTag {...harnessOf(t)} />
               </div>
             )) : <p className="border-t border-border px-3.5 py-3 text-[12px] text-fg-subtle">Nothing here</p>)}
           </section>
