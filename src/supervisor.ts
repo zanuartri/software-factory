@@ -151,7 +151,7 @@ const PATH_TOKEN = /[\w./\\-]+\.\w+/g;
  *  a failing verify counts only if its log tail names a file inside the ticket's scope (flaky timing and infra errors don't). */
 export function ownFault(scopePaths: string[], verifyTails: string[], structuralOrReviewer: boolean): boolean {
   if (structuralOrReviewer) return true;
-  return verifyTails.some((log) => (log.match(PATH_TOKEN) ?? []).some((tok) => inScope(tok.replace(/\\/g, "/"), scopePaths)));
+  return verifyTails.some((log) => (log.match(PATH_TOKEN) ?? []).some((tok) => inScope(tok.replace(/\\/g, "/").replace(/^\.\//, ""), scopePaths)));
 }
 
 let pickSeq = 0;

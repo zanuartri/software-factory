@@ -124,6 +124,11 @@ test("a skill/plugin slash command shows as a user bubble; its skill expansion s
   expect(readChat("s10").msgs.map((m) => [m.role, m.text])).toEqual([["user", "/factory:run"], ["user", "/factory:plan x y"], ["user", "/clear"]]);
 });
 
+test("a user message that merely mentions <command-name> mid-string stays a user bubble", () => {
+  write("s11", [note("k5", "how do I use <command-name> in a transcript?")]);
+  expect(readChat("s11").msgs.map((m) => [m.role, m.text])).toEqual([["user", "how do I use <command-name> in a transcript?"]]);
+});
+
 test("a pasted image is counted on the user message", () => {
   write("s9", [{ type: "user", uuid: "u1", message: { role: "user", content: [{ type: "text", text: "what is this" }, { type: "image", source: { type: "base64", data: "AAAA" } }] } }]);
   expect(readChat("s9").msgs[0]).toMatchObject({ role: "user", text: "what is this", images: 1 });

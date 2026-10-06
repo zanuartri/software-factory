@@ -87,7 +87,7 @@ export function readChat(session: string, limit = 300): Read {
     } else if (raw.includes("<local-command-stdout>")) { // output of a local slash command (/cost, /context, /model…)
       const out = tag(raw, "local-command-stdout").replace(ANSI, "").trim();
       if (out) msgs.push({ id: uuid, role: "notice", text: out, notice: { kind: "command", title: clip(out.split("\n")[0], 120), body: out.includes("\n") ? clip(out, 3000) : undefined } });
-    } else if (raw.includes("<command-name>")) { // built-ins are name-first, skill/plugin commands message-first
+    } else if (/^(<command-message>[^<]*<\/command-message>\s*)?<command-name>/.test(raw)) { // built-ins are name-first, skill/plugin commands message-first; a mere mention mid-string is prose
       msgs.push({ id: uuid, role: "user", text: `${tag(raw, "command-name")} ${tag(raw, "command-args")}`.trim() });
     } else if (/^\[Request interrupted/.test(raw)) {
       msgs.push({ id: uuid, role: "notice", text: raw, notice: { kind: "command", title: raw.includes("tool use") ? "Interrupted during a tool call" : "Interrupted" } });

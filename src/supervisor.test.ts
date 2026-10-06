@@ -211,6 +211,7 @@ test("effectiveQuality: neutral blocks do not pad the outcome count", () => {
 test("ownFault: a verify failure naming an in-scope file is the worker's fault", () => {
   expect(ownFault(["src/supervisor.ts"], ["src/supervisor.ts:129:1 - error TS2322: Type 'x' is not assignable"], false)).toBe(true);
   expect(ownFault(["src/**"], ["src\\a.ts(3,5): error TS1005: ';' expected"], false)).toBe(true);
+  expect(ownFault(["src/a.ts"], ["./src/a.ts:12:3 - error TS2304: Cannot find name 'x'"], false)).toBe(true); // verify logs print ./ paths
 });
 
 test("ownFault: a verify failure that names no in-scope file is not the worker's fault", () => {

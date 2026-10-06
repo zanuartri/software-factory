@@ -40,6 +40,9 @@ test("shell can't reach the worker's own daemon API", () => {
       'powershell -c "Invoke-WebRequest $env:FACTORY_URL/api/ws"',
       `bun -e "fetch(process.env.FACTORY_URL+'/api/ws/x')"`,
       "rg x && curl $FACTORY_URL/api/ws/x",
+      "rg FACTORY_URL src 2>&1 && curl $FACTORY_URL", // the 2>&1 strip must not mask a real &&
+      `rg "fetch (process.env.FACTORY_URL)" src`, // whitespace before ( still makes it an HTTP client
+      "rg FACTORY_URL src 2>&1 | head", // a pipe is still chaining, even after a redirect
       "curl http://[::1]:4545/api/ws/x",
       "curl http://0.0.0.0:4545/health",
       "curl http://127.1:4545/health",
@@ -70,6 +73,7 @@ test("daemon API guard: the search exemption needs a single unchained invocation
     ]) expect(check("Bash", { command: cmd }, ctx).allow).toBe(false);
     for (const cmd of [
       "rg FACTORY_URL src",
+      "rg FACTORY_URL src 2>&1", // a redirect is not chaining
       "git grep /api/runs/ -- src",
       "grep -rn FACTORY_URL src",
       `rg x; bun test src`, // chained, but mentions no daemon string
