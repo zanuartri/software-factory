@@ -158,3 +158,9 @@ test("suggestionFrom recognizes dim Claude ghost text only on an idle input", ()
   expect(suggestionFrom(workingScreen)).toBeNull();
   expect(suggestionFrom(blockedScreen)).toBeNull();
 });
+test("suggestionFrom ignores extended-colour parameters when detecting dim text", () => {
+  expect(suggestionFrom("❯ \x1b[38;2;10;2;30mtyped\x1b[0m")).toBeNull();
+  expect(suggestionFrom("❯ \x1b[38;5;2mtyped\x1b[0m")).toBeNull();
+  expect(suggestionFrom("❯ \x1b[2mghost\x1b[0m")).toBe("ghost");
+  expect(suggestionFrom("❯ \x1b[2;38;2;1;2;3mghost\x1b[0m")).toBe("ghost");
+});

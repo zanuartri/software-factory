@@ -143,7 +143,13 @@ export function suggestionFrom(screen: string): string | null {
       const sgr = part.match(/^\x1b\[([0-9;]*)m$/);
       if (sgr) {
         const codes = sgr[1] ? sgr[1].split(";") : ["0"];
-        for (const code of codes) { if (code === "0" || code === "22") dim = false; else if (code === "2") dim = true; }
+        for (let i = 0; i < codes.length; i++) {
+          const code = codes[i];
+          if (code === "38" || code === "48" || code === "58") {
+            i += codes[i + 1] === "5" ? 2 : codes[i + 1] === "2" ? 4 : 0;
+          } else if (code === "0" || code === "22") dim = false;
+          else if (code === "2") dim = true;
+        }
       } else if (part.trim()) {
         if (!dim) invalid = true;
         text += part;
