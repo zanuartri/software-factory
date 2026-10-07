@@ -502,10 +502,10 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize, visible }: 
                 : <button type="submit" title={uploading ? "Wait for image uploads to finish" : live && st === "working" ? "Queue message (Enter) · Ctrl+Enter interrupts and sends" : "Send"} aria-label="Send" disabled={!live || reconnecting || (!text.trim() && !files.length) || uploading} className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg transition-opacity hover:opacity-90 disabled:opacity-25"><ArrowUp className="size-4" strokeWidth={2.25} /></button>}
             </div>
           </form>
-          {(chat?.usage?.ctx || chat?.usage?.h5 || chat?.usage?.d7) && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-fg-muted">
-            {chat.usage.ctx && <Ring pct={chat.usage.ctx.pct} title={`Context ${chat.usage.ctx.pct}% · ${chat.usage.ctx.used} / ${chat.usage.ctx.size}`} />}
-            {chat.usage.h5 && <Limit label="5h" m={chat.usage.h5} />}
-            {chat.usage.d7 && <Limit label="7d" m={chat.usage.d7} />}
+          {(chat?.usage?.ctx || chat?.usage?.h5 || chat?.usage?.d7) && <div className="mt-2 flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-hidden px-1 text-[11px] text-fg-muted">
+            {chat.usage.ctx && <span className="flex min-w-0 items-center gap-1.5"><Ring pct={chat.usage.ctx.pct} title={`Context ${chat.usage.ctx.pct}% · ${chat.usage.ctx.used} / ${chat.usage.ctx.size}`} /><span className="min-w-0 truncate tabular-nums">{chat.usage.ctx.used} / {chat.usage.ctx.size}</span></span>}
+            {chat.usage.h5 && <span className="shrink-0"><Limit label="5h" m={chat.usage.h5} /></span>}
+            {chat.usage.d7 && <span className="shrink-0"><Limit label="7d" m={chat.usage.d7} /></span>}
           </div>}
         </div>
       </div>
