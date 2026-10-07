@@ -152,7 +152,7 @@ function fakeHerdr() {
     `  const agents = existsSync(marker) ? [{ pane_id: "fake-pane", name, agent: "claude", agent_status: st, cwd: "", agent_session: { value: "s1" } }] : [];`,
     `  console.log(JSON.stringify({ result: { agents } }));`,
     `}`,
-    `else if (cmd === "agent" && sub === "read") console.log(process.argv.includes("--format") ? "❯ \\x1b[0m\\x1b[2mSuggested next prompt\\x1b[0m" : "❯ Suggested next prompt");`,
+    `else if (cmd === "agent" && sub === "read") { const screen = join(import.meta.dir, "screen.txt"); console.log(existsSync(screen) ? readFileSync(screen, "utf8") : process.argv.includes("--format") ? "❯ \\x1b[0m\\x1b[2mSuggested next prompt\\x1b[0m" : "❯ Suggested next prompt"); }`,
     `else if (cmd === "agent" && sub === "send-keys") { appendFileSync(keys, process.argv.slice(5).join(" ") + "\\n"); if (process.argv[5] === "esc" && existsSync(nextStatus)) writeFileSync(status, readFileSync(nextStatus, "utf8")); }`,
     `else if (cmd === "agent" && sub === "prompt") appendFileSync(keys, "prompt:" + process.argv.slice(5).join(" ") + "\\n");`,
     `else process.exit(0);`,
@@ -274,6 +274,32 @@ test("no live pane: background tasks clear as done; a started pane reports them 
     writeFileSync(d.fake.status, "working");
     const working = (await (await d.get(`/api/ws/${w.id}/chat`)).json()) as any;
     expect(working.suggestion).toBeNull();
+  } finally { await d.stop(); }
+}, 30000);
+test("GET chat revision changes for prompt focus and agent status, and stays stable otherwise", async () => {
+  const d = await daemonWithFakeHerdr({});
+  try {
+    const proj = join(d.home, ".claude", "projects", "p");
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, "s1.jsonl"), `${JSON.stringify({ type: "user", uuid: "u1", message: { role: "user", content: [{ type: "text", text: "hello" }] } })}\n`);
+    const w = await registerRepo(d.post);
+    await d.post(`/api/ws/${w.id}/attach`, { session: "s1", force: true });
+    await d.post(`/api/ws/${w.id}/chat/start`, { resume: false });
+    writeFileSync(d.fake.status, "blocked");
+    const screen = join(d.fake.dir, "screen.txt");
+    writeFileSync(screen, "Pick a color?\n❯ 1. Green\n  2. Blue\nEnter to select · ↑/↓ to navigate · Esc to cancel");
+    const getChat = async () => (await d.get(`/api/ws/${w.id}/chat`)).json() as Promise<{ rev: string; prompt: { options: { focused: boolean }[] } }>;
+    const first = await getChat();
+    expect(first.prompt.options.map((o) => o.focused)).toEqual([true, false]);
+    expect((await getChat()).rev).toBe(first.rev);
+
+    writeFileSync(screen, "Pick a color?\n  1. Green\n❯ 2. Blue\nEnter to select · ↑/↓ to navigate · Esc to cancel");
+    const focused = await getChat();
+    expect(focused.prompt.options.map((o) => o.focused)).toEqual([false, true]);
+    expect(focused.rev).not.toBe(first.rev);
+
+    writeFileSync(d.fake.status, "working");
+    expect((await getChat()).rev).not.toBe(focused.rev);
   } finally { await d.stop(); }
 }, 30000);
 

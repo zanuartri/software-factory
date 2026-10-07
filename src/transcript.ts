@@ -16,8 +16,9 @@ export type ChatMsg = { id: string; role: "user" | "assistant" | "tool" | "notic
 export type Activity = { running: { name: string; detail: string } | null; background: number };
 
 const PROJECTS = join(homedir(), ".claude", "projects");
-type Read = { msgs: ChatMsg[]; model: string | null; activity: Activity; queued: string[] };
-const cache = new Map<string, { sig: string } & Read>();
+type Read = { rev: string; msgs: ChatMsg[]; model: string | null; activity: Activity; queued: string[] };
+type Cached = { sig: string; msgs: ChatMsg[]; model: string | null; activity: Activity; queued: string[] };
+const cache = new Map<string, Cached>();
 
 export const transcriptPath = (session: string) => {
   if (!existsSync(PROJECTS)) return null;
@@ -58,13 +59,12 @@ function agentProgress(dir: string, a: AgentInfo) {
 
 export function readChat(session: string, limit = 300): Read {
   const f = transcriptPath(session);
-  if (!f) return { msgs: [], model: null, activity: { running: null, background: 0 }, queued: [] };
+  if (!f) return { rev: "", msgs: [], model: null, activity: { running: null, background: 0 }, queued: [] };
   const subDir = join(dirname(f), session, "subagents");
   const st = statSync(f);
   const sig = [`${st.mtimeMs}:${st.size}`, ...jsonls(subDir).map((s) => { const x = statSync(s); return `${x.mtimeMs}:${x.size}`; })].join("|");
   const hit = cache.get(f);
-  if (hit?.sig === sig) return { ...hit, msgs: hit.msgs.slice(-limit) };
-
+  if (hit?.sig === sig) return { rev: sig, msgs: hit.msgs.slice(-limit), model: hit.model, activity: hit.activity, queued: hit.queued };
   const msgs: ChatMsg[] = [];
   let model: string | null = null;
   const byId = new Map<string, ChatMsg>(); // tool_use id → its message, so results and notifications can find it
@@ -192,5 +192,5 @@ export function readChat(session: string, limit = 300): Read {
   const activity = { running, background };
   const queued = queue.filter((q) => q.trim() && !q.startsWith("<"));
   cache.set(f, { sig, msgs, model, activity, queued }); // ponytail: re-parses the whole file on change; tail-read incrementally if transcripts get huge
-  return { msgs: msgs.slice(-limit), model, activity, queued };
+  return { rev: sig, msgs: msgs.slice(-limit), model, activity, queued };
 }

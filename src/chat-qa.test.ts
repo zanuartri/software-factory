@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -35,6 +35,23 @@ const use = (id: string, name: string, input: unknown) => ({ type: "assistant", 
 const result = (id: string, content: unknown, tur?: unknown, extra: object = {}) => ({ type: "user", uuid: `r-${id}`, message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content, ...extra }] }, toolUseResult: tur });
 const note = (uuid: string, xml: string) => ({ type: "user", uuid, message: { role: "user", content: xml } });
 const write = (name: string, rows: object[]) => writeFileSync(join(home, ".claude", "projects", "p", `${name}.jsonl`), rows.map((r) => JSON.stringify(r)).join("\n"));
+
+test("readChat revision covers stable transcript reads, appended entries, and sidechain changes", () => {
+  write("s-revision", [note("u1", "first")]);
+  const transcript = join(home, ".claude", "projects", "p", "s-revision.jsonl");
+  const first = readChat("s-revision").rev;
+  expect(readChat("s-revision").rev).toBe(first);
+  appendFileSync(transcript, `\n${line(note("u2", "second"))}`);
+  const appended = readChat("s-revision").rev;
+  expect(appended).not.toBe(first);
+  const sidecars = join(home, ".claude", "projects", "p", "s-revision", "subagents");
+  mkdirSync(sidecars, { recursive: true });
+  const sidecar = join(sidecars, "agent-ag1.jsonl");
+  writeFileSync(sidecar, `${line({ type: "assistant", message: { content: [{ type: "text", text: "one" }] } })}\n`);
+  const withSidecar = readChat("s-revision").rev;
+  appendFileSync(sidecar, `${line({ type: "assistant", message: { content: [{ type: "text", text: "two" }] } })}\n`);
+  expect(readChat("s-revision").rev).not.toBe(withSidecar);
+});
 
 test("tool calls carry their result and error state; a running call is the activity", () => {
   write("s2", [use("t1", "Bash", { command: "ls" }), result("t1", "a.txt\n", { stdout: "a.txt" }), use("t2", "Read", { file_path: "x" }), result("t2", "boom", undefined, { is_error: true }), use("t3", "Grep", { pattern: "foo" })]);

@@ -1,6 +1,6 @@
 import { marked } from "marked";
 import { Monitor, Moon, Sun } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Harness } from "./api";
 
 export const HARNESS_COLOR: Record<string, string> = {
@@ -79,9 +79,10 @@ export function StatusIcon({ status, size = 14 }: { status: string; size?: numbe
   );
 }
 
-export const Md = ({ text, className = "" }: { text: string; className?: string }) => (
-  <div className={`md ${className}`} dangerouslySetInnerHTML={{ __html: marked.parse(text || "", { async: false }) as string }} />
-);
+export const Md = memo(function Md({ text, className = "" }: { text: string; className?: string }) {
+  const html = useMemo(() => marked.parse(text || "", { async: false }) as string, [text]);
+  return <div className={`md ${className}`} dangerouslySetInnerHTML={{ __html: html }} />;
+});
 
 export function PageHeader({ title, sub, children, className = "" }: { title: string; sub?: ReactNode; children?: ReactNode; className?: string }) {
   return (
