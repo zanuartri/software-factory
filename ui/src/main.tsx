@@ -21,6 +21,9 @@ const VIEWS = [
   { id: "settings", label: "Settings", icon: Settings2 },
 ] as const;
 type View = (typeof VIEWS)[number]["id"];
+const maxChatW = () => Math.max(0, Math.min(900, innerWidth - 360));
+const clampChatW = (w: number) => { const max = maxChatW(); return Math.min(Math.max(w, Math.min(320, max)), max); };
+
 
 /** #/<ws>/<view>[/<ticket>] */
 function useRoute() {
@@ -51,19 +54,21 @@ function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(() => innerWidth >= 1024);
   const [chatMax, setChatMax] = useState(false);
-  const [chatW, setChatW] = useState(() => { try { return Math.min(Math.max(Number(localStorage.getItem("chatW")) || 400, 320), 900); } catch { return 400; } });
+  const [preferredChatW, setPreferredChatW] = useState(() => { try { return Number(localStorage.getItem("chatW")) || 400; } catch { return 400; } });
+  const [chatW, setChatW] = useState(() => clampChatW(preferredChatW));
   const [viewportWidth, setViewportWidth] = useState(() => innerWidth);
   const chatWidth = Math.max(0, Math.min(chatW, viewportWidth - 360));
   useEffect(() => {
-    const resize = () => setViewportWidth(innerWidth);
-    addEventListener("resize", resize);
-    return () => removeEventListener("resize", resize);
-  }, []);
+    const resize = () => { setViewportWidth(innerWidth); setChatW(clampChatW(preferredChatW)); };
+    addEventListener("resize", resize); return () => removeEventListener("resize", resize);
+  }, [preferredChatW]);
+  const saveChatW = (w: number) => { setChatW(w); setPreferredChatW(w); try { localStorage.setItem("chatW", String(w)); } catch {} };
+  const resetChatW = () => { setChatW(clampChatW(400)); setPreferredChatW(400); try { localStorage.removeItem("chatW"); } catch {} };
   const drag = (e: React.PointerEvent<HTMLDivElement>) => {
     const startX = e.clientX, startW = chatWidth;
     let w = startW;
-    const move = (ev: PointerEvent) => { const maxW = Math.max(0, Math.min(900, innerWidth - 360)); w = Math.min(Math.max(startW + ev.clientX - startX, Math.min(320, maxW)), maxW); setChatW(w); };
-    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); removeEventListener("pointercancel", up); document.body.style.userSelect = ""; try { localStorage.setItem("chatW", String(w)); } catch {} };
+    const move = (ev: PointerEvent) => { w = clampChatW(startW + ev.clientX - startX); setChatW(w); };
+    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); removeEventListener("pointercancel", up); document.body.style.userSelect = ""; saveChatW(w); };
     document.body.style.userSelect = "none";
     addEventListener("pointermove", move); addEventListener("pointerup", up); addEventListener("pointercancel", up);
   };
@@ -143,7 +148,9 @@ function App() {
       <div className="relative flex min-h-0 flex-1">
         {/* chat is the left column on wide screens; below lg it covers the content */}
         <aside hidden={!chatOpen} className={`absolute inset-0 z-30 lg:relative lg:border-border ${chatMax ? "lg:min-w-0 lg:flex-1" : "lg:w-(--chat-w) lg:shrink-0 lg:border-r"}`} style={{ "--chat-w": `${chatWidth}px` } as React.CSSProperties} aria-label="manager chat">
-          {!chatMax && <div onPointerDown={drag} onDoubleClick={() => { setChatW(400); try { localStorage.removeItem("chatW"); } catch {} }} role="separator" aria-orientation="vertical" aria-label="Resize chat" title="Drag to resize · double-click to reset"
+          {!chatMax && <div onPointerDown={drag} onDoubleClick={resetChatW}
+            onKeyDown={(e) => { if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return; e.preventDefault(); const w = clampChatW(chatWidth + (e.key === "ArrowRight" ? 16 : -16)); saveChatW(w); }}
+            tabIndex={0} role="separator" aria-orientation="vertical" aria-label="Resize chat" aria-valuenow={chatWidth} aria-valuemin={320} aria-valuemax={maxChatW()} title="Drag to resize · double-click to reset"
             className="absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize touch-none transition-colors hover:bg-accent/30 active:bg-accent/40 lg:block" />}
           <ChatPanel key={ws.id} ws={ws} toast={setToast} max={chatMax} visible={chatOpen} onToggleMax={() => setChatMax((x) => !x)} onMinimize={() => { setChatOpen(false); setChatMax(false); }} />
         </aside>
@@ -173,7 +180,7 @@ function App() {
       </div>
 
       {route.ticket && <TicketDrawer key={route.ticket} ws={ws} id={route.ticket} onClose={() => go({ ticket: null })} toast={setToast} />}
-      <Toast msg={toast} onDone={clear} />
+      <Toast msg={toast} onDone={clear} chatOpen={chatOpen} />
     </div>
   );
 }

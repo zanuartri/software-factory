@@ -99,11 +99,11 @@ export function useTick(ms = 1000) {
   useEffect(() => { const t = setInterval(() => set((x) => x + 1), ms); return () => clearInterval(t); }, [ms]);
 }
 
-export function Toast({ msg, onDone }: { msg: string | null; onDone: () => void }) {
+export function Toast({ msg, onDone, chatOpen = false }: { msg: string | null; onDone: () => void; chatOpen?: boolean }) {
   useEffect(() => { if (msg) { const t = setTimeout(onDone, 5000); return () => clearTimeout(t); } }, [msg, onDone]);
   if (!msg) return null;
   return (
-    <div role="status" className="fade-up fixed right-5 bottom-5 z-50 max-w-md rounded-xl border border-border bg-surface px-4 py-3 text-[13px] whitespace-pre-wrap shadow-[var(--shadow-lg)]">
+    <div role="status" className={`fade-up fixed right-5 bottom-5 z-50 max-w-md rounded-xl border border-border bg-surface px-4 py-3 text-[13px] whitespace-pre-wrap shadow-[var(--shadow-lg)] ${chatOpen ? "max-lg:top-5 max-lg:bottom-auto" : ""}`}>
       {msg}
     </div>
   );

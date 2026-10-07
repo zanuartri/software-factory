@@ -58,11 +58,11 @@ const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wid
     const el = scroller.current;
     if (!el) return;
     stick.current = true;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    el.scrollTo({ top: el.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }, [stick]);
   return (
     <div className="relative min-h-0 flex-1">
-      <div ref={scroller} onScroll={onScroll} className="h-full overflow-y-auto px-3 py-3">
+      <div ref={scroller} role="log" aria-label="Chat messages" aria-live="polite" aria-relevant="additions" onScroll={onScroll} className="h-full overflow-y-auto px-3 py-3">
         <div ref={content} className={`flex min-h-full flex-col justify-end gap-3 ${wide}`}>
           {loadError && !chat && (
             <div role="alert" className="grid flex-1 place-items-center text-center">
@@ -339,7 +339,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize, visible }: 
     });
   };
   const matches = q === null ? [] : cmds.filter((c) => c.name.toLowerCase().includes(q)).sort((a, b) => Number(b.name.toLowerCase().startsWith(q)) - Number(a.name.toLowerCase().startsWith(q)));
-  const pick = (c: Cmd) => { setText(`/${c.name} `); setSel(0); };
+  const pick = (c: Cmd) => { setText(`/${c.name} `); setSel(0); input.current?.focus(); };
   const st = chat?.prompt ? "blocked" : chat?.status ?? "offline";
   const reconnecting = consecutiveFailures >= 3;
   const failedInitialLoad = !chat && !!loadError;
@@ -391,27 +391,28 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize, visible }: 
               {!f.path && <span aria-label={`Uploading ${f.name}`} className="absolute inset-0 grid place-items-center"><span className="size-5 animate-spin rounded-full border-2 border-white/40 border-t-white" /></span>}
               <button type="button" aria-label={`remove ${f.name}`} onClick={() => setFiles((a) => a.filter((x) => x.id !== f.id))} className="absolute -top-1.5 -right-1.5 grid size-5 place-items-center rounded-full border border-border bg-surface text-fg-muted hover:text-fg"><X className="size-3" /></button>
             </div>)}</div>}
-            {matches.length > 0 && <div role="listbox" aria-label="commands" className="absolute right-0 bottom-full left-0 z-10 mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-[var(--shadow-lg)]">
-              {matches.map((c, i) => <button key={c.name} ref={i === sel ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined} type="button" role="option" aria-selected={i === sel} onMouseEnter={() => setSel(i)} onMouseDown={(e) => { e.preventDefault(); pick(c); }}
+            {matches.length > 0 && <div id="chat-command-listbox" role="listbox" aria-label="commands" className="absolute right-0 bottom-full left-0 z-10 mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-[var(--shadow-lg)]">
+              {matches.map((c, i) => <button key={c.name} id={`chat-command-option-${i}`} ref={i === sel ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined} type="button" role="option" aria-selected={i === sel} onMouseEnter={() => setSel(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(c)}
                 className={`flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left ${i === sel ? "bg-hover" : ""}`}>
                 <span className="shrink-0 font-mono text-[12.5px] text-fg">/{c.name}</span><span className="truncate text-[11.5px] text-fg-subtle">{c.desc}</span>
               </button>)}
             </div>}
             <textarea ref={input} value={text} onChange={(e) => { setText(e.target.value); setSel(0); setMenuOff(false); }} rows={1} disabled={!live || !!chat?.prompt || reconnecting} aria-label="message"
+              aria-controls={matches.length ? "chat-command-listbox" : undefined} aria-activedescendant={matches.length ? `chat-command-option-${sel}` : undefined}
               placeholder={chat?.prompt ? "Answer the question above…" : live ? "Message the manager…  ( / for commands )" : "Start or resume a session to chat"}
               onPaste={(e) => { const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/")); if (imgs.length && !e.clipboardData.getData("text/plain")) { e.preventDefault(); addFiles(imgs); } }}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return;
-                if (e.key === "Tab" && suggestion) { e.preventDefault(); useSuggestion(); return; }
+                if (e.key === "Tab" && !e.shiftKey && suggestion && !text) { e.preventDefault(); useSuggestion(); return; }
                 if (matches.length) {
                   if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setSel((i) => (i + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length); return; }
-                  if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && text.slice(1) !== matches[sel].name)) { e.preventDefault(); pick(matches[sel]); return; }
+                  if (e.key === "Enter" && !e.shiftKey && text.slice(1) !== matches[sel].name) { e.preventDefault(); pick(matches[sel]); return; }
                   if (e.key === "Escape") { e.preventDefault(); setMenuOff(true); return; }
                 }
                 if (e.key === "Escape") { if (st === "working") { e.preventDefault(); act(() => api(`${base}/interrupt`, { method: "POST" })); } return; }
                 if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (uploading) toast("Wait for image uploads to finish before sending."); else send(text, (e.ctrlKey || e.metaKey) && st === "working"); }
               }}
-              className="no-ring block max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[13.5px] leading-relaxed text-fg outline-none placeholder:text-fg-subtle disabled:opacity-50" />
+              className="no-ring block max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[16px] leading-relaxed text-fg outline-none placeholder:text-fg-subtle disabled:opacity-50 sm:text-[13.5px]" />
             <div className="flex items-center gap-1 px-2 pb-2">
               <Select variant="bare" className="h-7 max-w-[200px] px-2! py-0! text-[12px] text-fg-muted" ariaLabel="model" value={optimisticModel?.value ?? chat?.model ?? ""} disabled={!live || st === "working" || !!chat?.prompt || st === "blocked"}
                 options={models.map((m) => ({ value: m, label: m }))} onChange={chooseModel} placeholder="Model" />
@@ -424,7 +425,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize, visible }: 
                 : <button type="submit" title={uploading ? "Wait for image uploads to finish" : live && st === "working" ? "Queue message (Enter) · Ctrl+Enter interrupts and sends" : "Send"} aria-label="Send" disabled={!live || reconnecting || (!text.trim() && !files.length) || uploading} className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg transition-opacity hover:opacity-90 disabled:opacity-25"><ArrowUp className="size-4" strokeWidth={2.25} /></button>}
             </div>
           </form>
-          {(chat?.usage?.ctx || chat?.usage?.h5 || chat?.usage?.d7) && <div className="mt-2 flex items-center justify-between gap-2 overflow-hidden whitespace-nowrap px-1 text-[11px] text-fg-muted">
+          {(chat?.usage?.ctx || chat?.usage?.h5 || chat?.usage?.d7) && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-fg-muted">
             {chat.usage.ctx && <Ring pct={chat.usage.ctx.pct} title={`Context ${chat.usage.ctx.pct}% · ${chat.usage.ctx.used} / ${chat.usage.ctx.size}`} />}
             {chat.usage.h5 && <Limit label="5h" m={chat.usage.h5} />}
             {chat.usage.d7 && <Limit label="7d" m={chat.usage.d7} />}
