@@ -1,7 +1,8 @@
 // <repo>/.factory is the git-tracked source of truth for tickets, issues, rules and settings.
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { Harness } from "./db";
 
 export const STATUSES = ["draft", "open", "in_progress", "in_review", "done"] as const;
@@ -56,11 +57,26 @@ export const DEFAULT_SETTINGS = {
 export type Settings = typeof DEFAULT_SETTINGS;
 
 const dir = (repo: string, sub = "") => join(repo, ".factory", sub);
+const LOCAL_EXCLUDES: Record<string, true> = { ".factory/tickets/": true, ".factory/issues/": true };
+
+function ensureLocalExcludes(repo: string) {
+  try {
+    const exclude = resolve(repo, execFileSync("git", ["rev-parse", "--git-path", "info/exclude"], { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim());
+    const content = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+    const lines = content.split(/\r?\n/);
+    const missing = Object.keys(LOCAL_EXCLUDES).filter((line) => !lines.includes(line));
+    if (missing.length || (content && !content.endsWith("\n"))) {
+      mkdirSync(dirname(exclude), { recursive: true });
+      writeFileSync(exclude, `${content}${content && !content.endsWith("\n") ? "\n" : ""}${missing.join("\n")}${missing.length ? "\n" : ""}`);
+    }
+  } catch { /* Non-git repositories, unavailable git and inaccessible exclude files are best-effort. */ }
+}
 
 export function ensureLayout(repo: string) {
   for (const d of ["tickets", "issues"]) mkdirSync(dir(repo, d), { recursive: true });
   if (!existsSync(dir(repo, "settings.json"))) saveSettings(repo, DEFAULT_SETTINGS);
   if (!existsSync(dir(repo, "rules.md"))) writeFileSync(dir(repo, "rules.md"), "# Standing orders\n\n1. (run /factory:init to scan the repo)\n");
+  ensureLocalExcludes(repo); // Already-tracked files remain tracked; this only affects future untracked files.
 }
 
 /** `<FACTORY_HOME>/catalog.json`, the same default db.ts uses — computed here to avoid the DB import side effect. */

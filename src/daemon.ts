@@ -343,7 +343,10 @@ const server = Bun.serve({
     message() {},
   },
 });
-for (const w of sup.listWorkspaces()) watchWs(w.id, w.path);
+for (const w of sup.listWorkspaces()) {
+  try { store.ensureLayout(w.path); } catch { /* A broken repo layout must not prevent daemon startup. */ }
+  watchWs(w.id, w.path);
+}
 sup.recoverAfterRestart();
 onEvent((e) => server.publish("events", JSON.stringify(e)));
 console.log(`factoryd listening on http://127.0.0.1:${PORT} (home ${HOME}, pid ${process.pid})`);

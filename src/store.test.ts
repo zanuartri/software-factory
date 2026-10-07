@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -5,7 +6,7 @@ import { join } from "node:path";
 
 const home = mkdtempSync(join(tmpdir(), "factory-store-home-"));
 process.env.FACTORY_HOME = home;
-const { CATALOG_FROM_GLOBAL, DEFAULT_SETTINGS, loadSettings, readTicket, saveSettings, settingsPatch, updateTicket } = await import("./store");
+const { CATALOG_FROM_GLOBAL, DEFAULT_SETTINGS, ensureLayout, loadSettings, readTicket, saveSettings, settingsPatch, updateTicket } = await import("./store");
 
 const CATALOG = {
   "omp:hy3": { cost: 2, quality: 5, family: "omp" },
@@ -28,6 +29,42 @@ const ticketFile = (repo: string, id: string, extra = "") => {
   writeFileSync(f, `---\nid: ${id}\ntitle: x\nstatus: draft\npriority: p2\n${extra}---\n\n## Goal\nG\n`);
   return f;
 };
+
+const initRepo = () => {
+  const repo = mkRepo();
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  return repo;
+};
+
+test("ensureLayout adds local ticket and issue excludes once and preserves existing content", () => {
+  const repo = initRepo();
+  const exclude = join(repo, ".git", "info", "exclude");
+  writeFileSync(exclude, "existing-pattern\n");
+
+  ensureLayout(repo);
+  ensureLayout(repo);
+
+  const content = readFileSync(exclude, "utf8");
+  expect(content).toBe("existing-pattern\n.factory/tickets/\n.factory/issues/\n");
+  expect(content.split("\n").filter((line) => line === ".factory/tickets/")).toHaveLength(1);
+  expect(content.split("\n").filter((line) => line === ".factory/issues/")).toHaveLength(1);
+  writeFileSync(exclude, ".factory/tickets/\n.factory/issues/");
+  ensureLayout(repo);
+  expect(readFileSync(exclude, "utf8")).toBe(".factory/tickets/\n.factory/issues/\n");
+});
+
+test("ensureLayout ignores a non-git directory without throwing", () => {
+  expect(() => ensureLayout(mkRepo())).not.toThrow();
+});
+
+test("ensureLayout exclusions are created and confirmed by git check-ignore", () => {
+  const repo = initRepo();
+  const exclude = join(repo, ".git", "info", "exclude");
+  rmSync(exclude);
+  ensureLayout(repo);
+  const ignored = execFileSync("git", ["check-ignore", ".factory/tickets/example.md", ".factory/issues/example.md"], { cwd: repo, encoding: "utf8" });
+  expect(ignored.trim().split(/\r?\n/)).toEqual([".factory/tickets/example.md", ".factory/issues/example.md"]);
+});
 
 test("settingsPatch: JSON form still works", () => {
   expect(settingsPatch(DEFAULT_SETTINGS, ['{"max_workers":5}'])).toEqual({ max_workers: 5 });

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,6 +73,33 @@ test("a daemon that binds its port still recovers stale runs", async () => {
     await stopDaemon(port, p);
   }
 }, 20000);
+
+test("daemon startup restores local excludes for an existing workspace", async () => {
+  const repo = mkdtempSync(join(tmpdir(), "factory-restart-"));
+  Bun.spawnSync(["git", "init", repo]);
+  let daemon = await startDaemon();
+  const api = (path: string, init?: RequestInit) => fetch(`http://127.0.0.1:${daemon.port}${path}`, init);
+  let id = "";
+  try {
+    expect(daemon.up).toBe(true);
+    const registered = await api("/api/workspaces", { method: "POST", body: JSON.stringify({ path: repo }) }).then((r) => r.json() as Promise<{ id: string }>);
+    id = registered.id;
+    expect(id).toBeTruthy();
+    await stopDaemon(daemon.port, daemon.p);
+
+    rmSync(join(repo, ".git", "info", "exclude"));
+    daemon = await startDaemon();
+    expect(daemon.up).toBe(true);
+    const workspaces = await api("/api/workspaces").then((r) => r.json() as Promise<{ id: string }[]>);
+    expect(workspaces.some((w) => w.id === id)).toBe(true);
+    expect(execFileSync("git", ["check-ignore", ".factory/tickets/restart.md", ".factory/issues/restart.md"], { cwd: repo, encoding: "utf8" }).trim().split(/\r?\n/))
+      .toEqual([".factory/tickets/restart.md", ".factory/issues/restart.md"]);
+  } finally {
+    if (id) await api(`/api/workspaces/${id}`, { method: "DELETE" }).catch(() => {});
+    await stopDaemon(daemon.port, daemon.p);
+    rmSync(repo, { recursive: true, force: true });
+  }
+}, 60000);
 
 test("DELETE /api/workspaces/:id unregisters the workspace but not the repo", async () => {
   const repo = mkdtempSync(join(tmpdir(), "factory-del-"));
