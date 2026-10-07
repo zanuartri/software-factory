@@ -6,10 +6,11 @@ import { AgentCard, NoticeRow, TodoCard, ToolRow, UserBubble, type Activity, typ
 import { Select } from "./select";
 import { firstLoadOutcome } from "./chat-load";
 import { Btn, Dot, Md } from "./ui";
+import { reconcilePending, type PendingMessage } from "./chat-state";
 
 type Chat = { rev: string; session: string | null; pane?: string | null; status: string; model?: string | null; activity?: Activity; queued?: string[]; prompt?: Prompt | { raw: string } | null; suggestion?: string | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[]; total: number };
 type Cmd = { name: string; desc: string };
-type Pending = { key: string; text: string; imgs: string[]; after: string | null };
+type Pending = PendingMessage & { imgs: string[] };
 const promptSignature = (prompt: Prompt | { raw: string }) => "raw" in prompt ? prompt.raw : JSON.stringify([prompt.title, prompt.tabs.map((tab) => tab.label)]);
 
 const MessageRow = memo(function MessageRow({ m, latestTodo }: { m: Msg; latestTodo: boolean }) {
@@ -376,17 +377,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize, visible }: 
     hadPrompt.current = !!chat?.prompt;
   }, [chat?.prompt]);
   useEffect(() => { const el = input.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } }, [text]);
-  useEffect(() => {
-    const users = (chat?.messages ?? []).filter((m) => m.role === "user"), queued = chat?.queued ?? [];
-    setPending((ps) => {
-      const next = ps.filter((p) => {
-        if (queued.includes(p.text)) return false;
-        const i = p.after ? users.findIndex((m) => m.id === p.after) : -1;
-        return !(i >= 0 ? users.slice(i + 1) : users).some((m) => m.text === p.text);
-      });
-      return next.length === ps.length ? ps : next;
-    });
-  }, [chat]);
+  useEffect(() => { setPending((ps) => reconcilePending(ps, chat?.messages ?? [], chat?.queued ?? [])); }, [chat]);
 
   const act = useCallback(async (fn: () => Promise<unknown>, ok?: string) => {
     setBusy(true);
