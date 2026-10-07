@@ -113,7 +113,7 @@ const omp: Adapter = {
   caps: { liveSteer: true, abort: true, resume: true, oneProcPerTurn: false },
   async start(o) {
     const args = [...bin("omp"), "--mode", "rpc", "--session-dir", join(o.runDir, "omp-sessions"),
-      "-e", join(ROOT, "harness", "omp-extension.ts"), "--approval-mode", "yolo", "--no-title"]; // guard = extension tool_call hook; nobody can answer a prompt headless
+      "-e", join(ROOT, "harness", "omp-extension.ts"), "--config", join(ROOT, "harness", "omp-factory.yml"), "--approval-mode", "yolo", "--no-title"]; // guard = extension tool_call hook; nobody can answer a prompt headless
     if (o.model) args.push("--model", o.model);
     if (o.resumeSession) args.push("--continue");
     if (o.role === "reviewer") args.push("--tools", ["read", "grep", "glob", ...TOOLS.filter((t) => (t.roles as readonly string[]).includes("reviewer")).map((t) => t.name)].join(",")); // read-only built-ins + the reviewer's factory tools
