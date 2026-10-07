@@ -114,6 +114,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   type Att = { id: string; name: string; blob: string; path?: string };
   const [files, setFiles] = useState<Att[]>([]);
   const [drag, setDrag] = useState(false);
+  const dragDepth = useRef(0);
   const picker = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [cmds, setCmds] = useState<Cmd[]>([]);
@@ -121,6 +122,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const [menuOff, setMenuOff] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const stick = useRef(true);
+  const hadPrompt = useRef(false);
   const base = `/api/ws/${ws.id}/chat`;
 
   const seq = useRef(0);
@@ -155,6 +157,15 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
     return () => clearInterval(t);
   }, [load, ws.manager]);
   useEffect(() => { api<Cmd[]>(`${base}/commands`).then(setCmds).catch(() => {}); }, [base]);
+  useEffect(() => {
+    const onDrag = (e: DragEvent) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); };
+    addEventListener("dragover", onDrag); addEventListener("drop", onDrag);
+    return () => { removeEventListener("dragover", onDrag); removeEventListener("drop", onDrag); };
+  }, []);
+  useEffect(() => {
+    if (hadPrompt.current && !chat?.prompt && (!document.activeElement || document.activeElement === document.body || (document.activeElement instanceof HTMLElement && document.activeElement.closest('[role="group"][aria-label^="Claude is waiting"]')))) input.current?.focus();
+    hadPrompt.current = !!chat?.prompt;
+  }, [chat?.prompt]);
   useEffect(() => { const el = input.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } }, [text]);
   useEffect(() => {
     const users = (chat?.messages ?? []).filter((m) => m.role === "user"), queued = chat?.queued ?? [];
@@ -175,13 +186,20 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const start = useCallback((resume: boolean) => act(() => api(`${base}/start`, { body: { resume } }), resume ? "Session resumed in herdr" : "New session started in herdr"), [act, base]);
   const answer = useCallback((a: Answer) => act(() => api(`${base}/answer`, { body: a })), [act, base]);
   const addFiles = (list: File[]) => {
-    for (const f of list.filter((x) => /^image\/(png|jpeg|gif|webp)$/.test(x.type))) {
+    let slots = Math.max(0, 6 - files.length);
+    for (const f of list) {
+      if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { toast(`${f.name}: unsupported file type; use PNG, JPEG, GIF, or WebP.`); continue; }
+      if (f.size > 10 * 1024 * 1024) { toast(`${f.name}: file exceeds the 10 MB limit.`); continue; }
+      if (!slots) { toast(`${f.name}: maximum 6 image attachments.`); continue; }
+      slots--;
       const id = crypto.randomUUID(), blob = URL.createObjectURL(f);
       setFiles((a) => [...a, { id, name: f.name, blob }]);
+      const failed = () => { URL.revokeObjectURL(blob); setFiles((a) => a.filter((x) => x.id !== id)); };
       const rd = new FileReader();
       rd.onload = () => api<{ path: string }>(`${base}/upload`, { body: { name: f.name, mime: f.type, data: String(rd.result).split(",")[1] } })
         .then((r) => setFiles((a) => a.map((x) => (x.id === id ? { ...x, path: r.path } : x))))
-        .catch((e: unknown) => { toast(e instanceof Error ? e.message : String(e)); setFiles((a) => a.filter((x) => x.id !== id)); });
+        .catch((e: unknown) => { toast(e instanceof Error ? e.message : String(e)); failed(); });
+      rd.onerror = () => { toast(`${f.name}: could not read image.`); failed(); };
       rd.readAsDataURL(f);
     }
   };
@@ -207,7 +225,10 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const useSuggestion = () => { if (!suggestion) return; setText(suggestion); input.current?.focus(); };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-bg">
+    <div className="relative flex h-full min-h-0 flex-col bg-bg"
+      onDragEnter={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); dragDepth.current++; setDrag(true); } }}
+      onDragLeave={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDrag(false); } }}
+      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); dragDepth.current = 0; setDrag(false); addFiles([...e.dataTransfer.files]); } }}>
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
         <Dot on={live} color={meta?.color} pulse={st === "working"} />
         <div className="min-w-0 flex-1">
@@ -229,11 +250,11 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
             <span className="shrink-0">Suggested</span><span className="min-w-0 flex-1 truncate">{suggestion}</span><span className="shrink-0 text-fg-subtle">Tab to use</span>
           </button>}
           <form onSubmit={(e) => { e.preventDefault(); send(); }}
-            onDragOver={(e) => { if (live && e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDrag(true); } }} onDragLeave={() => setDrag(false)}
-            onDrop={(e) => { setDrag(false); if (e.dataTransfer.files.length) { e.preventDefault(); addFiles([...e.dataTransfer.files]); } }}
+            onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
             className={`relative rounded-2xl border bg-surface shadow-[var(--shadow)] transition focus-within:border-border-strong focus-within:ring-4 focus-within:ring-[color-mix(in_srgb,var(--accent)_15%,transparent)] ${drag ? "border-accent" : "border-border"}`}>
-            {files.length > 0 && <div className="flex flex-wrap gap-2 px-3 pt-3">{files.map((f) => <div key={f.id} className="relative">
+            {files.length > 0 && <div className="flex flex-wrap gap-2 px-3 pt-3">{files.map((f) => <div key={f.id} className="relative" aria-busy={!f.path}>
               <img src={f.blob} alt={f.name} className={`size-14 rounded-lg border border-border object-cover ${f.path ? "" : "opacity-50"}`} />
+              {!f.path && <span aria-label={`Uploading ${f.name}`} className="absolute inset-0 grid place-items-center"><span className="size-5 animate-spin rounded-full border-2 border-white/40 border-t-white" /></span>}
               <button type="button" aria-label={`remove ${f.name}`} onClick={() => setFiles((a) => a.filter((x) => x.id !== f.id))} className="absolute -top-1.5 -right-1.5 grid size-5 place-items-center rounded-full border border-border bg-surface text-fg-muted hover:text-fg"><X className="size-3" /></button>
             </div>)}</div>}
             {matches.length > 0 && <div role="listbox" aria-label="commands" className="absolute right-0 bottom-full left-0 z-10 mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-[var(--shadow-lg)]">
@@ -244,7 +265,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
             </div>}
             <textarea ref={input} value={text} onChange={(e) => { setText(e.target.value); setSel(0); setMenuOff(false); }} rows={1} disabled={!live || !!chat?.prompt} aria-label="message"
               placeholder={chat?.prompt ? "Answer the question above…" : live ? "Message the manager…  ( / for commands )" : "Start or resume a session to chat"}
-              onPaste={(e) => { const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/")); if (imgs.length) { e.preventDefault(); addFiles(imgs); } }}
+              onPaste={(e) => { const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/")); if (imgs.length && !e.clipboardData.getData("text/plain")) { e.preventDefault(); addFiles(imgs); } }}
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing) return;
                 if (e.key === "Tab" && suggestion) { e.preventDefault(); useSuggestion(); return; }
@@ -254,7 +275,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
                   if (e.key === "Escape") { e.preventDefault(); setMenuOff(true); return; }
                 }
                 if (e.key === "Escape") { if (st === "working") { e.preventDefault(); act(() => api(`${base}/interrupt`, { method: "POST" })); } return; }
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(text, (e.ctrlKey || e.metaKey) && st === "working"); }
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (uploading) toast("Wait for image uploads to finish before sending."); else send(text, (e.ctrlKey || e.metaKey) && st === "working"); }
               }}
               className="no-ring block max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[13.5px] leading-relaxed text-fg outline-none placeholder:text-fg-subtle disabled:opacity-50" />
             <div className="flex items-center gap-1 px-2 pb-2">
@@ -266,7 +287,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
               <span className="ml-auto" />
               {live && st === "working" && !text.trim() && !files.length
                 ? <button type="button" title="Interrupt (Esc)" aria-label="Interrupt" disabled={busy} onClick={() => act(() => api(`${base}/interrupt`, { method: "POST" }))} className="grid size-7 place-items-center rounded-full border border-border text-fg-muted transition-colors hover:bg-hover hover:text-fg disabled:opacity-40"><Square className="size-3 fill-current" /></button>
-                : <button type="submit" title={live && st === "working" ? "Queue message (Enter) · Ctrl+Enter interrupts and sends" : "Send"} aria-label="Send" disabled={!live || (!text.trim() && !files.length) || uploading} className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg transition-opacity hover:opacity-90 disabled:opacity-25"><ArrowUp className="size-4" strokeWidth={2.25} /></button>}
+                : <button type="submit" title={uploading ? "Wait for image uploads to finish" : live && st === "working" ? "Queue message (Enter) · Ctrl+Enter interrupts and sends" : "Send"} aria-label="Send" disabled={!live || (!text.trim() && !files.length) || uploading} className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg transition-opacity hover:opacity-90 disabled:opacity-25"><ArrowUp className="size-4" strokeWidth={2.25} /></button>}
             </div>
           </form>
           {(chat?.usage?.ctx || chat?.usage?.h5 || chat?.usage?.d7) && <div className="mt-2 flex items-center justify-between gap-2 overflow-hidden whitespace-nowrap px-1 text-[11px] text-fg-muted">
