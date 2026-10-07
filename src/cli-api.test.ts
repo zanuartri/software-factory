@@ -270,6 +270,27 @@ test("chat rejects plain text while the manager is blocked", async () => {
 }, 30000);
 
 
+test("GET chat returns total, honors limit, caps it at 2000, and varies rev by limit", async () => {
+  const d = await daemonWithFakeHerdr({});
+  try {
+    const proj = join(d.home, ".claude", "projects", "p");
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, "s1.jsonl"), Array.from({ length: 2001 }, (_, i) =>
+      JSON.stringify({ type: "user", uuid: `u${i}`, message: { role: "user", content: `message ${i}` } })).join("\n"));
+    const w = await registerRepo(d.post);
+    await d.post(`/api/ws/${w.id}/attach`, { session: "s1", force: true });
+    const small = await (await d.get(`/api/ws/${w.id}/chat?limit=2`)).json() as { total: number; messages: unknown[]; rev: string };
+    expect(small.total).toBe(2001);
+    expect(small.messages).toHaveLength(2);
+    const larger = await (await d.get(`/api/ws/${w.id}/chat?limit=4`)).json() as { total: number; messages: unknown[]; rev: string };
+    expect(larger.messages).toHaveLength(4);
+    expect(larger.rev).not.toBe(small.rev);
+    const capped = await (await d.get(`/api/ws/${w.id}/chat?limit=9999`)).json() as { total: number; messages: unknown[] };
+    expect(capped.messages).toHaveLength(2000);
+    expect(capped.total).toBe(2001);
+  } finally { await d.stop(); }
+}, 30000);
+
 test("no live pane: background tasks clear as done; a started pane reports them again", async () => {
   const d = await daemonWithFakeHerdr({});
   try {

@@ -35,6 +35,20 @@ const use = (id: string, name: string, input: unknown) => ({ type: "assistant", 
 const result = (id: string, content: unknown, tur?: unknown, extra: object = {}) => ({ type: "user", uuid: `r-${id}`, message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content, ...extra }] }, toolUseResult: tur });
 const note = (uuid: string, xml: string) => ({ type: "user", uuid, message: { role: "user", content: xml } });
 const write = (name: string, rows: object[]) => writeFileSync(join(home, ".claude", "projects", "p", `${name}.jsonl`), rows.map((r) => JSON.stringify(r)).join("\n"));
+test("readChat reports the full row count and returns the requested tail", () => {
+  write("s-limit", [note("u1", "first"), note("u2", "second"), note("u3", "third")]);
+  expect(readChat("s-limit", 2)).toMatchObject({ total: 3, msgs: [{ id: "u2", text: "second" }, { id: "u3", text: "third" }] });
+  expect(readChat("s-limit", 1)).toMatchObject({ total: 3, msgs: [{ id: "u3", text: "third" }] });
+});
+test("readChat revision is shared while total and message tails reflect each limit", () => {
+  write("s-limit", [note("u1", "first"), note("u2", "second"), note("u3", "third")]);
+  const small = readChat("s-limit", 1), large = readChat("s-limit", 2);
+  expect(small.total).toBe(3);
+  expect(large.total).toBe(3);
+  expect(small.msgs.map((m) => m.text)).toEqual(["third"]);
+  expect(large.msgs.map((m) => m.text)).toEqual(["second", "third"]);
+});
+
 
 test("readChat revision covers stable transcript reads, appended entries, and sidechain changes", () => {
   write("s-revision", [note("u1", "first")]);

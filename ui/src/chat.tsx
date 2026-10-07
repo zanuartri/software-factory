@@ -1,12 +1,12 @@
 import { ArrowDown, ArrowUp, Maximize2, Minimize2, PanelLeftClose, Paperclip, Play, Plus, RotateCw, Square, X } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type Workspace } from "./api";
 import { AnswerLog, AskCard, type Answer, type Prompt } from "./ask";
 import { AgentCard, NoticeRow, TodoCard, ToolRow, UserBubble, type Activity, type Msg } from "./thread";
 import { Select } from "./select";
 import { Btn, Dot, Md } from "./ui";
 
-type Chat = { rev: string; session: string | null; pane?: string | null; status: string; model?: string | null; activity?: Activity; queued?: string[]; prompt?: Prompt | { raw: string } | null; suggestion?: string | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[] };
+type Chat = { rev: string; session: string | null; pane?: string | null; status: string; model?: string | null; activity?: Activity; queued?: string[]; prompt?: Prompt | { raw: string } | null; suggestion?: string | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[]; total: number };
 type Cmd = { name: string; desc: string };
 type Pending = { key: string; text: string; imgs: string[]; after: string | null };
 const promptSignature = (prompt: Prompt | { raw: string }) => "raw" in prompt ? prompt.raw : JSON.stringify([prompt.title, prompt.tabs.map((tab) => tab.label)]);
@@ -22,19 +22,39 @@ const MessageRow = memo(function MessageRow({ m, latestTodo }: { m: Msg; latestT
   return <Md text={m.text} className="break-words" />;
 });
 
-const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wide, lastTodo, activity, start, answer, stick }: {
+const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wide, lastTodo, activity, start, answer, stick, limit, loadEarlier, loadingEarlier, loadError, retry }: {
   chat: Chat | null; pending: Pending[]; st: string; live: boolean; busy: boolean; wide: string; lastTodo?: string;
   activity?: Activity; start: (resume: boolean) => void; answer: (a: Answer) => void; stick: { current: boolean };
+  limit: number; loadEarlier: () => void; loadingEarlier: boolean; loadError: string | null; retry: () => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const msgs = chat?.messages ?? [];
+  const restoreScroll = useRef<{ top: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = scroller.current, restore = restoreScroll.current;
+    if (el && restore) { el.scrollTop = restore.top + el.scrollHeight - restore.height; restoreScroll.current = null; }
+  }, [chat?.messages.length]);
   useEffect(() => { const el = scroller.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [chat?.messages.at(-1)?.id, pending.length, !!chat?.prompt]);
   useEffect(() => { const el = scroller.current; if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80); }, [chat?.messages.at(-1)?.id, pending.length, !!chat?.prompt]);
   return (
     <div className="relative min-h-0 flex-1">
       <div ref={scroller} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setAtBottom(stick.current); }} className="h-full overflow-y-auto px-3 py-3">
         <div className={`flex min-h-full flex-col justify-end gap-3 ${wide}`}>
+          {loadError && !chat && (
+            <div role="alert" className="grid flex-1 place-items-center text-center">
+              <div>
+                <p className="text-[13px] font-medium">Could not load chat</p>
+                <p className="mt-1 max-w-sm text-[12.5px] text-fg-muted">{loadError}</p>
+                <Btn kind="primary" onClick={retry}><RotateCw className="size-3.5" />Retry</Btn>
+              </div>
+            </div>
+          )}
+          {chat && chat.total > msgs.length && <div className="flex items-center justify-center gap-2 py-1 text-[11.5px] text-fg-muted">
+            <span>Showing last {msgs.length} of {chat.total}</span>
+            {limit < 2000 && <button type="button" disabled={loadingEarlier} onClick={() => { const el = scroller.current; if (el) restoreScroll.current = { top: el.scrollTop, height: el.scrollHeight }; loadEarlier(); }}
+              className="font-medium text-accent hover:underline disabled:opacity-50">{loadingEarlier ? "Loading…" : "Show earlier"}</button>}
+          </div>}
           {chat && !live && !msgs.length && (
             <div className="grid flex-1 place-items-center text-center">
               <div>
@@ -110,6 +130,13 @@ function Limit({ label, m }: { label: string; m: Meter }) {
 export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Workspace; toast: (m: string) => void; max: boolean; onToggleMax: () => void; onMinimize: () => void }) {
   const wide = max ? "mx-auto w-full max-w-3xl" : "";
   const [chat, setChat] = useState<Chat | null>(null);
+  const [limit, setLimit] = useState(300);
+  const limitRef = useRef(300);
+  const [consecutiveFailures, setConsecutiveFailures] = useState(0);
+  const failureCount = useRef(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const hasLoaded = useRef(false);
   const [text, setText] = useState("");
   const [pending, setPending] = useState<Pending[]>([]);
   type Att = { id: string; name: string; blob: string; path?: string };
@@ -136,33 +163,55 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const inflight = useRef(false);
   const lastRev = useRef<string | null>(null);
   const previous = useRef<Chat | null>(null);
-  const load = useCallback(() => {
+  const load = useCallback((requestedLimit = limitRef.current) => {
     const mine = ++seq.current;
     inflight.current = true;
     const done = () => { if (mine === seq.current) inflight.current = false; };
-    return api<Chat>(base).then((d) => {
-      if (mine === seq.current && d.rev !== lastRev.current) {
-        const old = previous.current;
-        if (old) {
-          const byId = new Map(old.messages.map((m) => [m.id, m]));
-          d.messages = d.messages.map((m) => {
-            const prior = byId.get(m.id);
-            return prior && JSON.stringify(prior) === JSON.stringify(m) ? prior : m;
-          });
+    return api<Chat>(`${base}?limit=${requestedLimit}`).then((d) => {
+      if (mine === seq.current) {
+        hasLoaded.current = true;
+        failureCount.current = 0;
+        setConsecutiveFailures(0);
+        setLoadError(null);
+        if (d.rev !== lastRev.current) {
+          const old = previous.current;
+          if (old) {
+            const byId = new Map(old.messages.map((m) => [m.id, m]));
+            d.messages = d.messages.map((m) => {
+              const prior = byId.get(m.id);
+              return prior && JSON.stringify(prior) === JSON.stringify(m) ? prior : m;
+            });
+          }
+          lastRev.current = d.rev;
+          previous.current = d;
+          setChat(d);
         }
-        lastRev.current = d.rev;
-        previous.current = d;
-        setChat(d);
       }
       done();
-    }).catch(done);
+    }).catch((e: unknown) => {
+      if (mine === seq.current) {
+        failureCount.current++;
+        setConsecutiveFailures(failureCount.current);
+        if (!hasLoaded.current) setLoadError(e instanceof Error ? e.message : String(e));
+      }
+      done();
+    });
   }, [base]);
+  const loadEarlier = useCallback(() => {
+    if (loadingEarlier || limit >= 2000) return;
+    const next = Math.min(limit + 300, 2000);
+    setLoadingEarlier(true);
+    setLimit(next);
+    limitRef.current = next;
+    load(next).finally(() => setLoadingEarlier(false));
+  }, [limit, loadingEarlier, load]);
   useEffect(() => {
-    lastRev.current = null; previous.current = null;
-    setChat(null); setPending([]); load();
+    lastRev.current = null; previous.current = null; hasLoaded.current = false;
+    failureCount.current = 0; setConsecutiveFailures(0); setLoadError(null); limitRef.current = 300; setLimit(300);
+    setChat(null); setPending([]); load(300);
     const t = setInterval(() => { if (!document.hidden && !inflight.current) load(); }, 1500);
     return () => clearInterval(t);
-  }, [load, ws.manager]);
+  }, [base, ws.manager]);
   const refreshCommands = useCallback(() => { lastCmdFetch.current = Date.now(); api<Cmd[]>(`${base}/commands`).then(setCmds).catch(() => {}); }, [base]);
   const q = /^\/\S*$/.test(text) && !menuOff ? text.slice(1).toLowerCase() : null;
   useEffect(() => {
@@ -246,7 +295,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const mention = (p: string) => (p.includes(" ") ? `@"${p}"` : `@${p}`);
   const send = (raw = text, interrupt = false) => {
     const programmatic = raw !== text, typed = raw.trim(), atts = programmatic ? [] : files;
-    if ((!typed && !atts.length) || busy || atts.some((f) => !f.path)) return;
+    if ((!typed && !atts.length) || busy || consecutiveFailures >= 3 || atts.some((f) => !f.path)) return;
     const t = [typed || "Please look at the attached image" + (atts.length > 1 ? "s." : "."), ...atts.map((f) => mention(f.path!))].join("\n");
     const key = crypto.randomUUID(), after = (chat?.messages ?? []).filter((m) => m.role === "user").at(-1)?.id ?? null;
     if (!programmatic) { setText(""); setFiles([]); setPending((ps) => [...ps, { key, text: t, imgs: atts.map((f) => f.blob), after }]); stick.current = true; }
@@ -258,6 +307,8 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const matches = q === null ? [] : cmds.filter((c) => c.name.toLowerCase().includes(q)).sort((a, b) => Number(b.name.toLowerCase().startsWith(q)) - Number(a.name.toLowerCase().startsWith(q)));
   const pick = (c: Cmd) => { setText(`/${c.name} `); setSel(0); };
   const st = chat?.prompt ? "blocked" : chat?.status ?? "offline";
+  const reconnecting = consecutiveFailures >= 3;
+  const failedInitialLoad = !chat && !!loadError;
   const live = !!chat?.pane, meta = STATUS[st], msgs = chat?.messages ?? [];
   const models = useMemo(() => [...new Set([chat?.model, ...(ws.settings?.harnesses?.claude?.models ?? ["sonnet", "opus", "haiku"])].filter(Boolean) as string[])], [chat?.model, ws.settings]);
   const chooseModel = (m: string) => {
@@ -278,10 +329,10 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
       onDragLeave={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDrag(false); } }}
       onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); dragDepth.current = 0; setDrag(false); addFiles([...e.dataTransfer.files]); } }}>
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
-        <Dot on={live} color={meta?.color} pulse={st === "working"} />
+        <Dot on={live && !reconnecting && !failedInitialLoad} color={reconnecting || failedInitialLoad ? "var(--fg-subtle)" : meta?.color} pulse={st === "working" && !reconnecting} />
         <div className="min-w-0 flex-1">
           <span className="text-[13px] font-semibold">Manager</span>
-          <span className="ml-2 text-[11.5px] text-fg-subtle" title={chat?.session ?? undefined}>{live ? meta?.label : chat?.session ? "Not running in herdr" : "No session"}</span>
+          <span className="ml-2 text-[11.5px] text-fg-subtle" title={chat?.session ?? undefined}>{reconnecting ? "Reconnecting…" : failedInitialLoad ? "Connection error" : live ? meta?.label : chat?.session ? "Not running in herdr" : "No session"}</span>
         </div>
         {chat?.session && !live && <Btn kind="ghost" size="icon" title="Resume this session in herdr" disabled={busy} onClick={() => start(true)}><Play className="size-3.5" /></Btn>}
         <Btn kind="ghost" size="icon" title="Start a new session in herdr" disabled={busy} onClick={() => start(false)}><Plus className="size-4" /></Btn>
@@ -289,7 +340,8 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
         <Btn kind="ghost" size="icon" title="Collapse chat" onClick={onMinimize}><PanelLeftClose className="size-4" /></Btn>
       </div>
 
-      <ChatThread chat={chat} pending={pending} st={st} live={live} busy={busy} wide={wide} lastTodo={lastTodo} activity={activity} start={start} answer={answer} stick={stick} />
+      <ChatThread chat={chat} pending={pending} st={st} live={live} busy={busy} wide={wide} lastTodo={lastTodo} activity={activity} start={start} answer={answer} stick={stick}
+        limit={limit} loadEarlier={loadEarlier} loadingEarlier={loadingEarlier} loadError={loadError} retry={() => load()} />
 
       <div className="shrink-0 px-3 pt-1 pb-3">
         <div className={wide}>
@@ -311,7 +363,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
                 <span className="shrink-0 font-mono text-[12.5px] text-fg">/{c.name}</span><span className="truncate text-[11.5px] text-fg-subtle">{c.desc}</span>
               </button>)}
             </div>}
-            <textarea ref={input} value={text} onChange={(e) => { setText(e.target.value); setSel(0); setMenuOff(false); }} rows={1} disabled={!live || !!chat?.prompt} aria-label="message"
+            <textarea ref={input} value={text} onChange={(e) => { setText(e.target.value); setSel(0); setMenuOff(false); }} rows={1} disabled={!live || !!chat?.prompt || reconnecting} aria-label="message"
               placeholder={chat?.prompt ? "Answer the question above…" : live ? "Message the manager…  ( / for commands )" : "Start or resume a session to chat"}
               onPaste={(e) => { const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/")); if (imgs.length && !e.clipboardData.getData("text/plain")) { e.preventDefault(); addFiles(imgs); } }}
               onKeyDown={(e) => {
@@ -335,7 +387,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
               <span className="ml-auto" />
               {live && st === "working" && !text.trim() && !files.length
                 ? <button type="button" title="Interrupt (Esc)" aria-label="Interrupt" disabled={busy} onClick={() => act(() => api(`${base}/interrupt`, { method: "POST" }))} className="grid size-7 place-items-center rounded-full border border-border text-fg-muted transition-colors hover:bg-hover hover:text-fg disabled:opacity-40"><Square className="size-3 fill-current" /></button>
-                : <button type="submit" title={uploading ? "Wait for image uploads to finish" : live && st === "working" ? "Queue message (Enter) · Ctrl+Enter interrupts and sends" : "Send"} aria-label="Send" disabled={!live || (!text.trim() && !files.length) || uploading} className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg transition-opacity hover:opacity-90 disabled:opacity-25"><ArrowUp className="size-4" strokeWidth={2.25} /></button>}
+                : <button type="submit" title={uploading ? "Wait for image uploads to finish" : live && st === "working" ? "Queue message (Enter) · Ctrl+Enter interrupts and sends" : "Send"} aria-label="Send" disabled={!live || reconnecting || (!text.trim() && !files.length) || uploading} className="grid size-7 place-items-center rounded-full bg-primary text-primary-fg transition-opacity hover:opacity-90 disabled:opacity-25"><ArrowUp className="size-4" strokeWidth={2.25} /></button>}
             </div>
           </form>
           {(chat?.usage?.ctx || chat?.usage?.h5 || chat?.usage?.d7) && <div className="mt-2 flex items-center justify-between gap-2 overflow-hidden whitespace-nowrap px-1 text-[11px] text-fg-muted">
