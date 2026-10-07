@@ -1,4 +1,4 @@
-import { marked } from "marked";
+import { renderMd } from "./md";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Harness } from "./api";
@@ -80,7 +80,7 @@ export function StatusIcon({ status, size = 14 }: { status: string; size?: numbe
 }
 
 export const Md = memo(function Md({ text, className = "" }: { text: string; className?: string }) {
-  const html = useMemo(() => marked.parse(text || "", { async: false }) as string, [text]);
+  const html = useMemo(() => renderMd(text || ""), [text]);
   return <div className={`md ${className}`} dangerouslySetInnerHTML={{ __html: html }} />;
 });
 
