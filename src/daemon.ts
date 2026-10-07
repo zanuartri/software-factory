@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { db, emit, getRun, HOME, onEvent, PORT, type Run } from "./db";
@@ -12,6 +13,14 @@ import * as sup from "./supervisor";
 
 const json = (d: unknown, status = 200) => Response.json(d, { status });
 const body = async (req: Request) => (req.headers.get("content-length") === "0" ? {} : req.json().catch(() => ({})));
+const chatResponse = (req: Request, data: { rev: string; [key: string]: unknown }) => {
+  const digest = createHash("sha256").update(data.rev).digest("base64url");
+  const etag = `"${digest}"`;
+  const matches = req.headers.get("if-none-match")?.split(",").some((tag) => tag.trim() === "*" || tag.trim() === etag);
+  return matches
+    ? new Response(null, { status: 304, headers: { etag } })
+    : Response.json(data, { headers: { etag } });
+};
 const wsPath = (id: string) => sup.mustWs(id).path;
 /** Ticket status → count for the console; a workspace whose repo is gone lists no tickets, so it yields {}. */
 const ticketCounts = (repo: string) =>
@@ -28,6 +37,36 @@ async function managerAgent(w: ReturnType<typeof sup.mustWs>) {
   const sid = a?.agent_session?.value;
   if (a && sid && sid !== w.manager) sup.attachManager(w.id, sid, true);
   return a;
+}
+type SharedChatRead<T> = { promise: Promise<T>; expiresAt: number };
+const CHAT_READ_TTL_MS = 1000;
+const chatAgentReads = new Map<string, SharedChatRead<herdr.HerdrAgent | null>>();
+const chatScreenReads = new Map<string, SharedChatRead<string>>();
+function sharedChatRead<T>(cache: Map<string, SharedChatRead<T>>, key: string, read: () => Promise<T>) {
+  const now = Date.now();
+  for (const [cachedKey, cached] of cache) if (cached.expiresAt <= now) cache.delete(cachedKey);
+  const existing = cache.get(key);
+  if (existing) return existing.promise;
+  const entry: SharedChatRead<T> = { promise: read(), expiresAt: Number.POSITIVE_INFINITY };
+  cache.set(key, entry);
+  return entry.promise.then((value) => {
+    if (cache.get(key) === entry) entry.expiresAt = Date.now() + CHAT_READ_TTL_MS;
+    return value;
+  }, (error: unknown) => {
+    if (cache.get(key) === entry) cache.delete(key);
+    throw error;
+  });
+}
+function invalidateChatReads(ws: string) {
+  chatAgentReads.delete(ws);
+  const prefix = `${ws}\0`;
+  for (const key of chatScreenReads.keys()) if (key.startsWith(prefix)) chatScreenReads.delete(key);
+}
+function chatManagerAgent(ws: string) {
+  return sharedChatRead(chatAgentReads, ws, () => managerAgent(sup.mustWs(ws)));
+}
+function chatScreen(ws: string, pane: string) {
+  return sharedChatRead(chatScreenReads, `${ws}\0${pane}`, () => herdr.readAnsiScreen(pane));
 }
 
 function runDetail(r: Run) {
@@ -77,6 +116,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       const w = sup.removeWorkspace(params.id);
       watchers.get(w.id)?.close();
       watchers.delete(w.id);
+      invalidateChatReads(w.id);
       return json({ ok: true, id: w.id });
     },
   },
@@ -85,19 +125,19 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
   "/api/ws/:ws": {
     GET: ({ params }) => { const w = sup.mustWs(params.ws); return json({ ...w, settings: store.loadSettings(w.path), rules: store.loadRules(w.path), plan: sup.planState(w.id) }); },
   },
-  "/api/ws/:ws/attach": { POST: async (req) => { const b = await body(req); sup.attachManager(req.params.ws, b.session, b.force); return json({ ok: true }); } },
+  "/api/ws/:ws/attach": { POST: async (req) => { const b = await body(req); sup.attachManager(req.params.ws, b.session, b.force); invalidateChatReads(req.params.ws); return json({ ok: true }); } },
   // chat = the manager's Claude session inside herdr: transcript for reading, `herdr agent prompt` for writing
   "/api/ws/:ws/chat": {
     GET: async (req) => {
       const w = sup.mustWs(req.params.ws);
       let agent: herdr.HerdrAgent | null = null;
-      try { agent = await managerAgent(w); } catch (e) { return json({ error: `herdr unavailable: ${e instanceof Error ? e.message : String(e)}` }, 503); } // wrap's 400 would read as "offline"; the UI poll surfaces repeated 503s
+      try { agent = await chatManagerAgent(w.id); } catch (e) { return json({ error: `herdr unavailable: ${e instanceof Error ? e.message : String(e)}` }, 503); } // wrap's 400 would read as "offline"; the UI poll surfaces repeated 503s
       const fresh = sup.mustWs(req.params.ws); // re-read: a /clear re-links the workspace to the pane's new session
       const requested = Number(new URL(req.url).searchParams.get("limit") ?? 300);
       const limit = Number.isFinite(requested) ? Math.max(1, Math.min(2000, Math.floor(requested))) : 300;
-      if (!fresh.manager) return json({ rev: JSON.stringify(["", limit, 0]), session: null, status: "none", suggestion: null, total: 0, messages: [] });
+      if (!fresh.manager) return chatResponse(req, { rev: JSON.stringify(["", limit, 0]), session: null, status: "none", suggestion: null, total: 0, messages: [] });
       const { rev: transcriptRev, msgs, total, model, activity, queued } = herdr.readChat(fresh.manager, limit);
-      const ansiScreen = agent ? await herdr.readAnsiScreen(agent.pane_id) : "";
+      const ansiScreen = agent ? await chatScreen(w.id, agent.pane_id) : "";
       const screen = ansiScreen.replace(/\x1b\[[0-9;]*m/g, "");
       const usage = agent ? herdr.usageFrom(screen) : null;
       const prompt = agent ? await herdr.promptFrom(agent.pane_id, screen, agent.agent_status === "blocked", ansiScreen) : null;
@@ -107,7 +147,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       const messages = live ? msgs : msgs.map((m) => (m.tool?.status === "background" ? { ...m, tool: { ...m.tool, status: "done" } } : m));
       const status = agent?.agent_status ?? "offline", pane = agent?.pane_id ?? null;
       const rev = JSON.stringify([transcriptRev, fresh.manager, pane, status, prompt, suggestion, queued, usage, model, live ? activity : { ...activity, background: 0 }, limit, total]);
-      return json({ rev, session: fresh.manager, pane, status, model, usage, prompt, suggestion, total,
+      return chatResponse(req, { rev, session: fresh.manager, pane, status, model, usage, prompt, suggestion, total,
         activity: live ? activity : { ...activity, background: 0 }, queued, messages });
     },
     POST: async (req) => {
@@ -120,6 +160,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       if (await herdr.promptFrom(agent.pane_id, screen, false, ansiScreen)) throw new Error("manager is waiting for an answer; use /chat/answer");
       if (b.interrupt && agent.agent_status === "working") {
         await herdr.interrupt(agent.pane_id);
+        invalidateChatReads(w.id);
         await Bun.sleep(450);
         const fresh = await managerAgent(w);
         if (!fresh || fresh.agent_status === "blocked") throw new Error("manager is waiting for an answer; use /chat/answer");
@@ -129,6 +170,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
         await herdr.prompt(fresh.pane_id, b.text, true);
       } else await herdr.prompt(agent.pane_id, b.text, true);
       herdr.noteSent(b.text); // /reload-plugins re-reads the plugin dirs, so the autocomplete must rescan instead of serving the 30s cache
+      invalidateChatReads(w.id);
       return json({ ok: true });
     },
   },
@@ -160,6 +202,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       const w = sup.mustWs(req.params.ws), agent = await managerAgent(w);
       if (!agent) throw new Error("manager session is not running in herdr");
       await herdr.answer(agent.pane_id, await body(req));
+      invalidateChatReads(w.id);
       return json({ ok: true });
     },
   },
@@ -173,6 +216,7 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       for (const [pane, at] of lastInterrupt) if (now - at > 10_000) lastInterrupt.delete(pane);
       lastInterrupt.set(agent.pane_id, now);
       await herdr.interrupt(agent.pane_id);
+      invalidateChatReads(w.id);
       return json({ ok: true });
     },
   },
@@ -184,10 +228,12 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       if (old) {
         if (old.agent_status === "working") throw new Error("the current manager session is still working — interrupt it first");
         await herdr.closePane(old.pane_id);
+        invalidateChatReads(w.id);
         await Bun.sleep(500);
       }
       const session = await herdr.startClaude(w.path, w.name, herdr.agentName(w.id), b.resume ? w.manager ?? undefined : undefined, herdr.managerBrief(w));
       sup.attachManager(w.id, session, true);
+      invalidateChatReads(w.id);
       return json({ session });
     },
   },

@@ -150,10 +150,12 @@ function fakeHerdr() {
     `  const st = existsSync(status) ? readFileSync(status, "utf8").trim() : "done";`,
     `  const name = existsSync(join(import.meta.dir, "name.txt")) ? readFileSync(join(import.meta.dir, "name.txt"), "utf8") : "";`,
     `  const calls = join(import.meta.dir, "list-calls.txt"); writeFileSync(calls, String(Number(existsSync(calls) ? readFileSync(calls, "utf8") : 0) + 1));`,
+    `  // Deliberate integration delay keeps concurrent chat requests inside the same in-flight read.`,
+    `  if (existsSync(join(import.meta.dir, "slow-list.txt"))) await Bun.sleep(50);`,
     `  const agents = existsSync(marker) ? [{ pane_id: "fake-pane", name, agent: "claude", agent_status: st, cwd: "", agent_session: { value: "s1" } }] : [];`,
     `  console.log(JSON.stringify({ result: { agents } }));`,
     `}`,
-    `else if (cmd === "agent" && sub === "read") { const screen = join(import.meta.dir, "screen.txt"); console.log(existsSync(screen) ? readFileSync(screen, "utf8") : process.argv.includes("--format") ? "❯ \\x1b[0m\\x1b[2mSuggested next prompt\\x1b[0m" : "❯ Suggested next prompt"); }`,
+    `else if (cmd === "agent" && sub === "read") { const calls = join(import.meta.dir, "screen-calls.txt"); writeFileSync(calls, String(Number(existsSync(calls) ? readFileSync(calls, "utf8") : 0) + 1)); if (existsSync(join(import.meta.dir, "slow-screen.txt"))) await Bun.sleep(50); const screen = join(import.meta.dir, "screen.txt"); console.log(existsSync(screen) ? readFileSync(screen, "utf8") : process.argv.includes("--format") ? "❯ \\x1b[0m\\x1b[2mSuggested next prompt\\x1b[0m" : "❯ Suggested next prompt"); }`,
     `else if (cmd === "agent" && sub === "send-keys") { appendFileSync(keys, process.argv.slice(5).join(" ") + "\\n"); if (process.argv[5] === "esc") { if (existsSync(nextStatus)) writeFileSync(status, readFileSync(nextStatus, "utf8")); if (existsSync(nextScreen)) writeFileSync(join(import.meta.dir, "screen.txt"), readFileSync(nextScreen, "utf8")); } }`,
     `else if (cmd === "agent" && sub === "prompt") appendFileSync(keys, "prompt:" + process.argv.slice(5).join(" ") + "\\n");`,
     `else process.exit(0);`,
@@ -170,7 +172,7 @@ async function daemonWithFakeHerdr(extra: Record<string, string>) {
     env: { ...process.env, FACTORY_RUN_ID: "test", FACTORY_PORT: String(port), FACTORY_HOME: home, HOME: home, USERPROFILE: home, PATH: `${fake.dir};${process.env.PATH}`, ...extra },
     stdout: "ignore", stderr: "pipe", windowsHide: true,
   });
-  const get = (path: string) => fetch(`http://127.0.0.1:${port}${path}`);
+  const get = (path: string, init?: RequestInit) => fetch(`http://127.0.0.1:${port}${path}`, init);
   const post = (path: string, body: unknown) => fetch(`http://127.0.0.1:${port}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   let up = false;
   for (let i = 0; i < 300 && !up; i++) {
@@ -279,17 +281,64 @@ test("GET chat returns total, honors limit, caps it at 2000, and varies rev by l
       JSON.stringify({ type: "user", uuid: `u${i}`, message: { role: "user", content: `message ${i}` } })).join("\n"));
     const w = await registerRepo(d.post);
     await d.post(`/api/ws/${w.id}/attach`, { session: "s1", force: true });
-    const small = await (await d.get(`/api/ws/${w.id}/chat?limit=2`)).json() as { total: number; messages: unknown[]; rev: string };
+    expect((await d.post(`/api/ws/${w.id}/chat/start`, { resume: false })).status).toBe(200);
+    const smallRes = await d.get(`/api/ws/${w.id}/chat?limit=2`);
+    const small = await smallRes.json() as { total: number; messages: unknown[]; rev: string; status: string };
+    expect(small.status).toBe("done");
     expect(small.total).toBe(2001);
     expect(small.messages).toHaveLength(2);
-    const larger = await (await d.get(`/api/ws/${w.id}/chat?limit=4`)).json() as { total: number; messages: unknown[]; rev: string };
+    const etag = smallRes.headers.get("etag");
+    expect(etag).toBeTruthy();
+    expect(etag).toHaveLength(45);
+    const unchanged = await d.get(`/api/ws/${w.id}/chat?limit=2`, { headers: { "if-none-match": etag! } });
+    expect(unchanged.status).toBe(304);
+    expect(unchanged.headers.get("etag")).toBe(etag);
+    expect(await unchanged.text()).toBe("");
+    // This wall-clock wait deliberately verifies that the one-second in-memory chat read cache expires.
+    await Bun.sleep(1050);
+    writeFileSync(d.fake.status, "working");
+    const changedStatusRes = await d.get(`/api/ws/${w.id}/chat?limit=2`, { headers: { "if-none-match": etag! } });
+    expect(changedStatusRes.status).toBe(200);
+    const changedStatus = await changedStatusRes.json() as { status: string };
+    expect(changedStatus.status).toBe("working");
+    expect(changedStatusRes.headers.get("etag")).not.toBe(etag);
+    writeFileSync(d.fake.status, "done");
+    expect((await d.post(`/api/ws/${w.id}/chat`, { text: "refresh chat" })).status).toBe(200);
+    const afterSend = await d.get(`/api/ws/${w.id}/chat?limit=2`);
+    expect((await afterSend.json() as { status: string }).status).toBe("done");
+    const changed = await d.get(`/api/ws/${w.id}/chat?limit=4`, { headers: { "if-none-match": etag! } });
+    expect(changed.status).toBe(200);
+    const larger = await changed.json() as { total: number; messages: unknown[]; rev: string };
     expect(larger.messages).toHaveLength(4);
     expect(larger.rev).not.toBe(small.rev);
+    expect(changed.headers.get("etag")).not.toBe(etag);
     const capped = await (await d.get(`/api/ws/${w.id}/chat?limit=9999`)).json() as { total: number; messages: unknown[] };
     expect(capped.messages).toHaveLength(2000);
     expect(capped.total).toBe(2001);
   } finally { await d.stop(); }
 }, 30000);
+test("concurrent chat polls share herdr agent-list and screen reads per workspace", async () => {
+  const d = await daemonWithFakeHerdr({});
+  try {
+    const w = await registerRepo(d.post);
+    await d.post(`/api/ws/${w.id}/attach`, { session: "s1", force: true });
+    expect((await d.post(`/api/ws/${w.id}/chat/start`, { resume: false })).status).toBe(200);
+    writeFileSync(join(d.fake.dir, "list-calls.txt"), "0");
+    writeFileSync(join(d.fake.dir, "screen-calls.txt"), "0");
+    writeFileSync(join(d.fake.dir, "slow-list.txt"), "1");
+    writeFileSync(join(d.fake.dir, "slow-screen.txt"), "1");
+    const [first, second] = await Promise.all([
+      d.get(`/api/ws/${w.id}/chat`),
+      d.get(`/api/ws/${w.id}/chat`),
+    ]);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect((await d.get(`/api/ws/${w.id}/chat`)).status).toBe(200);
+    expect(readFileSync(join(d.fake.dir, "list-calls.txt"), "utf8")).toBe("1");
+    expect(readFileSync(join(d.fake.dir, "screen-calls.txt"), "utf8")).toBe("1");
+  } finally { await d.stop(); }
+}, 30000);
+
 
 test("no live pane: background tasks clear as done; a started pane reports them again", async () => {
   const d = await daemonWithFakeHerdr({});
@@ -317,6 +366,7 @@ test("no live pane: background tasks clear as done; a started pane reports them 
     expect(live.suggestion).toBe("Suggested next prompt");
     expect(live.messages.map((m: any) => [m.tool?.name, m.tool?.status])).toEqual([["Bash", "background"]]);
     writeFileSync(d.fake.status, "working");
+    await d.post(`/api/ws/${w.id}/attach`, { session: "s1", force: true }); // manager re-attach invalidates the read memo
     const working = (await (await d.get(`/api/ws/${w.id}/chat`)).json()) as any;
     expect(working.suggestion).toBeNull();
   } finally { await d.stop(); }
@@ -339,11 +389,13 @@ test("GET chat revision changes for prompt focus and agent status, and stays sta
     expect((await getChat()).rev).toBe(first.rev);
 
     writeFileSync(screen, "Pick a color?\n  1. Green\n❯ 2. Blue\nEnter to select · ↑/↓ to navigate · Esc to cancel");
+    await d.post(`/api/ws/${w.id}/attach`, { session: "s1", force: true });
     const focused = await getChat();
     expect(focused.prompt.options.map((o) => o.focused)).toEqual([false, true]);
     expect(focused.rev).not.toBe(first.rev);
 
     writeFileSync(d.fake.status, "working");
+    await d.post(`/api/ws/${w.id}/attach`, { session: "s1", force: true });
     expect((await getChat()).rev).not.toBe(focused.rev);
   } finally { await d.stop(); }
 }, 30000);

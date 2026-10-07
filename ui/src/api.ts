@@ -22,6 +22,8 @@ export type Issue = { id: string; title: string; status: string; kind: string; t
 export type Models = Record<Harness, { id: string; hint?: string }[]>;
 export type ReviewerPick = { harness: Harness | "auto"; model: string };
 export type Workspace = { id: string; name: string; path: string; manager: string | null; manager_seen: number | null; manager_status?: string | null; settings: any; plan: any; counts?: Record<string, number> };
+type CachedGet = { etag: string; data: unknown };
+const chatGetCache = new Map<string, CachedGet>();
 
 export async function api<T = any>(path: string, init?: { method?: string; body?: unknown; text?: boolean; timeout?: number }): Promise<T> {
   const method = init?.method ?? (init?.body !== undefined ? "POST" : "GET");
@@ -29,15 +31,30 @@ export async function api<T = any>(path: string, init?: { method?: string; body?
   const ac = new AbortController();
   const timer = timeout === 0 ? undefined : setTimeout(() => ac.abort(), timeout); // a hung GET must reject so callers (chat poll inflight) can reset
   try {
+    const chatGet = method.toUpperCase() === "GET" && /^\/api\/ws\/[^/]+\/chat(?:\?.*)?$/.test(path);
+    const cached = chatGet ? chatGetCache.get(path) : undefined;
+    const headers = new Headers({ "content-type": "application/json" });
+    if (cached) headers.set("if-none-match", cached.etag);
     const res = await fetch(path, {
       method,
-      headers: { "content-type": "application/json" },
+      headers,
       body: init?.body === undefined ? undefined : typeof init.body === "string" ? init.body : JSON.stringify(init.body),
       signal: ac.signal,
     });
-    if (init?.text) return (await res.text()) as T;
+    if (chatGet && res.status === 304) {
+      if (!cached) throw new Error("HTTP 304 without a cached chat response");
+      return cached.data as T;
+    }
+    if (init?.text) {
+      const data = await res.text();
+      const etag = res.headers.get("etag");
+      if (chatGet && etag) chatGetCache.set(path, { etag, data });
+      return data as T;
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(data.error ?? `HTTP ${res.status}`), { data });
+    const etag = res.headers.get("etag");
+    if (chatGet && etag) chatGetCache.set(path, { etag, data });
     return data;
   } finally { clearTimeout(timer); }
 }
