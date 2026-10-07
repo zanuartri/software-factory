@@ -4,6 +4,7 @@ import { api, type Workspace } from "./api";
 import { AnswerLog, AskCard, type Answer, type Prompt } from "./ask";
 import { AgentCard, NoticeRow, TodoCard, ToolRow, UserBubble, type Activity, type Msg } from "./thread";
 import { Select } from "./select";
+import { firstLoadOutcome } from "./chat-load";
 import { Btn, Dot, Md } from "./ui";
 
 type Chat = { rev: string; session: string | null; pane?: string | null; status: string; model?: string | null; activity?: Activity; queued?: string[]; prompt?: Prompt | { raw: string } | null; suggestion?: string | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[]; total: number };
@@ -28,6 +29,7 @@ const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wid
   limit: number; loadEarlier: () => void; loadingEarlier: boolean; loadError: string | null; retry: () => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const msgs = chat?.messages ?? [];
   const restoreScroll = useRef<{ top: number; height: number } | null>(null);
@@ -35,12 +37,33 @@ const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wid
     const el = scroller.current, restore = restoreScroll.current;
     if (el && restore) { el.scrollTop = restore.top + el.scrollHeight - restore.height; restoreScroll.current = null; }
   }, [chat?.messages.length]);
-  useEffect(() => { const el = scroller.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [chat?.messages.at(-1)?.id, pending.length, !!chat?.prompt]);
-  useEffect(() => { const el = scroller.current; if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80); }, [chat?.messages.at(-1)?.id, pending.length, !!chat?.prompt]);
+  useEffect(() => {
+    const el = scroller.current, body = content.current;
+    if (!el || !body) return;
+    const update = () => {
+      if (stick.current) el.scrollTop = el.scrollHeight;
+      else setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(body); observer.observe(el);
+    update();
+    return () => observer.disconnect();
+  }, [stick]);
+  const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    setAtBottom(stick.current);
+  }, [stick]);
+  const jump = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    stick.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [stick]);
   return (
     <div className="relative min-h-0 flex-1">
-      <div ref={scroller} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setAtBottom(stick.current); }} className="h-full overflow-y-auto px-3 py-3">
-        <div className={`flex min-h-full flex-col justify-end gap-3 ${wide}`}>
+      <div ref={scroller} onScroll={onScroll} className="h-full overflow-y-auto px-3 py-3">
+        <div ref={content} className={`flex min-h-full flex-col justify-end gap-3 ${wide}`}>
           {loadError && !chat && (
             <div role="alert" className="grid flex-1 place-items-center text-center">
               <div>
@@ -67,6 +90,7 @@ const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wid
               </div>
             </div>
           )}
+          {!chat && !loadError && <div className="text-center text-[13px] text-fg-muted">Loading chat…</div>}
           {msgs.map((m) => <MessageRow key={m.id} m={m} latestTodo={m.id === lastTodo} />)}
           {(chat?.queued ?? []).map((q, i) => <UserBubble key={`q${i}`} text={q} queued />)}
           {pending.map((p) => <UserBubble key={p.key} text={p.text} local={p.imgs} queued={st === "working"} />)}
@@ -82,7 +106,7 @@ const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wid
       </div>
       {!atBottom && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
-          <button type="button" aria-label="Scroll to latest" title="Jump to latest" onClick={() => { const el = scroller.current; if (!el) return; stick.current = true; el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }); }}
+          <button type="button" aria-label="Scroll to latest" title="Jump to latest" onClick={jump}
             className="fade-up pointer-events-auto z-[5] grid size-7 place-items-center rounded-full border border-border bg-surface text-fg-muted shadow-[var(--shadow-lg)] transition-colors hover:bg-hover hover:text-fg"><ArrowDown className="size-4" /></button>
         </div>
       )}
@@ -127,7 +151,7 @@ function Limit({ label, m }: { label: string; m: Meter }) {
 }
 
 /** Chat with the workspace's manager Claude session, which lives in herdr. Reads its transcript, writes through `herdr agent prompt`. */
-export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Workspace; toast: (m: string) => void; max: boolean; onToggleMax: () => void; onMinimize: () => void }) {
+export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize, visible }: { ws: Workspace; toast: (m: string) => void; max: boolean; onToggleMax: () => void; onMinimize: () => void; visible: boolean }) {
   const wide = max ? "mx-auto w-full max-w-3xl" : "";
   const [chat, setChat] = useState<Chat | null>(null);
   const [limit, setLimit] = useState(300);
@@ -161,6 +185,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
 
   const seq = useRef(0);
   const inflight = useRef(false);
+  const firstLoad = useRef(true);
   const lastRev = useRef<string | null>(null);
   const previous = useRef<Chat | null>(null);
   const load = useCallback((requestedLimit = limitRef.current) => {
@@ -187,8 +212,11 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
           setChat(d);
         }
       }
+      const outcome = firstLoadOutcome(mine, seq.current, firstLoad.current, false);
+      if (outcome === "loaded") { firstLoad.current = false; setLoadError(null); }
       done();
     }).catch((e: unknown) => {
+      if (firstLoadOutcome(mine, seq.current, firstLoad.current, true) === "failed") setLoadError(e instanceof Error ? e.message : String(e));
       if (mine === seq.current) {
         failureCount.current++;
         setConsecutiveFailures(failureCount.current);
@@ -197,6 +225,8 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
       done();
     });
   }, [base]);
+  const retry = useCallback(() => { load(); }, [load]);
+
   const loadEarlier = useCallback(() => {
     if (loadingEarlier || limit >= 2000) return;
     const next = Math.min(limit + 300, 2000);
@@ -206,12 +236,16 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
     load(next).finally(() => setLoadingEarlier(false));
   }, [limit, loadingEarlier, load]);
   useEffect(() => {
-    lastRev.current = null; previous.current = null; hasLoaded.current = false;
+    lastRev.current = null; previous.current = null; firstLoad.current = true; hasLoaded.current = false;
     failureCount.current = 0; setConsecutiveFailures(0); setLoadError(null); limitRef.current = 300; setLimit(300);
-    setChat(null); setPending([]); load(300);
+    setChat(null); setPending([]);
+  }, [base, ws.manager]);
+  useEffect(() => {
+    if (!visible) return;
+    load();
     const t = setInterval(() => { if (!document.hidden && !inflight.current) load(); }, 1500);
     return () => clearInterval(t);
-  }, [base, ws.manager]);
+  }, [load, visible, ws.manager]);
   const refreshCommands = useCallback(() => { lastCmdFetch.current = Date.now(); api<Cmd[]>(`${base}/commands`).then(setCmds).catch(() => {}); }, [base]);
   const q = /^\/\S*$/.test(text) && !menuOff ? text.slice(1).toLowerCase() : null;
   useEffect(() => {
@@ -300,7 +334,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
     const key = crypto.randomUUID(), after = (chat?.messages ?? []).filter((m) => m.role === "user").at(-1)?.id ?? null;
     if (!programmatic) { setText(""); setFiles([]); setPending((ps) => [...ps, { key, text: t, imgs: atts.map((f) => f.blob), after }]); stick.current = true; }
     api(base, { body: { text: t, interrupt } }).then(() => { load(); if (typed.startsWith("/reload-plugins")) refreshCommands(); }).catch((e: unknown) => {
-      if (!programmatic) { setPending((ps) => ps.filter((p) => p.key !== key)); setText(typed); setFiles(atts); }
+      if (!programmatic) { setPending((ps) => ps.filter((p) => p.key !== key)); setText((current) => current ? `${typed}\n${current}` : typed); setFiles(atts); }
       toast(e instanceof Error ? e.message : String(e));
     });
   };
@@ -341,7 +375,7 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
       </div>
 
       <ChatThread chat={chat} pending={pending} st={st} live={live} busy={busy} wide={wide} lastTodo={lastTodo} activity={activity} start={start} answer={answer} stick={stick}
-        limit={limit} loadEarlier={loadEarlier} loadingEarlier={loadingEarlier} loadError={loadError} retry={() => load()} />
+        limit={limit} loadEarlier={loadEarlier} loadingEarlier={loadingEarlier} loadError={loadError} retry={retry} />
 
       <div className="shrink-0 px-3 pt-1 pb-3">
         <div className={wide}>

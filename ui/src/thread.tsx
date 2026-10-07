@@ -23,7 +23,7 @@ export function UserBubble({ text, images = 0, queued, local = [] }: { text: str
   return (
     <div className={`ml-auto max-w-[85%] ${queued ? "opacity-70" : ""}`}>
       <div className="rounded-2xl rounded-br-md bg-bubble px-3.5 py-2 text-[13px] break-words whitespace-pre-wrap text-on-bubble">
-        {imgs.length > 0 && <div className="mb-1.5 flex flex-wrap gap-1.5">{imgs.map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer"><img src={u} alt="attached" className="max-h-40 max-w-full rounded-lg object-cover" /></a>)}</div>}
+        {imgs.length > 0 && <div className="mb-1.5 flex flex-wrap gap-1.5">{imgs.map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer"><img src={u} alt="attached" className="aspect-[4/3] w-40 max-w-full rounded-lg object-cover" /></a>)}</div>}
         {images > 0 && !imgs.length && <div className="mb-1 text-[12px] opacity-80">{images} image{images > 1 ? "s" : ""} attached</div>}
         {rest}
       </div>

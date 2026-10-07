@@ -52,13 +52,20 @@ function App() {
   const [chatOpen, setChatOpen] = useState(() => innerWidth >= 1024);
   const [chatMax, setChatMax] = useState(false);
   const [chatW, setChatW] = useState(() => { try { return Math.min(Math.max(Number(localStorage.getItem("chatW")) || 400, 320), 900); } catch { return 400; } });
+  const [viewportWidth, setViewportWidth] = useState(() => innerWidth);
+  const chatWidth = Math.max(0, Math.min(chatW, viewportWidth - 360));
+  useEffect(() => {
+    const resize = () => setViewportWidth(innerWidth);
+    addEventListener("resize", resize);
+    return () => removeEventListener("resize", resize);
+  }, []);
   const drag = (e: React.PointerEvent<HTMLDivElement>) => {
-    const startX = e.clientX, startW = chatW;
+    const startX = e.clientX, startW = chatWidth;
     let w = startW;
-    const move = (ev: PointerEvent) => { w = Math.min(Math.max(startW + ev.clientX - startX, 320), Math.min(900, innerWidth - 360)); setChatW(w); };
-    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); document.body.style.userSelect = ""; try { localStorage.setItem("chatW", String(w)); } catch {} };
+    const move = (ev: PointerEvent) => { const maxW = Math.max(0, Math.min(900, innerWidth - 360)); w = Math.min(Math.max(startW + ev.clientX - startX, Math.min(320, maxW)), maxW); setChatW(w); };
+    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); removeEventListener("pointercancel", up); document.body.style.userSelect = ""; try { localStorage.setItem("chatW", String(w)); } catch {} };
     document.body.style.userSelect = "none";
-    addEventListener("pointermove", move); addEventListener("pointerup", up);
+    addEventListener("pointermove", move); addEventListener("pointerup", up); addEventListener("pointercancel", up);
   };
   const clear = useCallback(() => setToast(null), []);
   const connected = useConnected();
@@ -135,13 +142,11 @@ function App() {
 
       <div className="relative flex min-h-0 flex-1">
         {/* chat is the left column on wide screens; below lg it covers the content */}
-        {chatOpen && (
-          <aside className={`absolute inset-0 z-30 lg:relative lg:border-border ${chatMax ? "lg:min-w-0 lg:flex-1" : "lg:w-(--chat-w) lg:shrink-0 lg:border-r"}`} style={{ "--chat-w": `${chatW}px` } as React.CSSProperties} aria-label="manager chat">
-            {!chatMax && <div onPointerDown={drag} onDoubleClick={() => { setChatW(400); try { localStorage.removeItem("chatW"); } catch {} }} role="separator" aria-orientation="vertical" aria-label="Resize chat" title="Drag to resize · double-click to reset"
-              className="absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize touch-none transition-colors hover:bg-accent/30 active:bg-accent/40 lg:block" />}
-            <ChatPanel key={ws.id} ws={ws} toast={setToast} max={chatMax} onToggleMax={() => setChatMax((x) => !x)} onMinimize={() => { setChatOpen(false); setChatMax(false); }} />
-          </aside>
-        )}
+        <aside hidden={!chatOpen} className={`absolute inset-0 z-30 lg:relative lg:border-border ${chatMax ? "lg:min-w-0 lg:flex-1" : "lg:w-(--chat-w) lg:shrink-0 lg:border-r"}`} style={{ "--chat-w": `${chatWidth}px` } as React.CSSProperties} aria-label="manager chat">
+          {!chatMax && <div onPointerDown={drag} onDoubleClick={() => { setChatW(400); try { localStorage.removeItem("chatW"); } catch {} }} role="separator" aria-orientation="vertical" aria-label="Resize chat" title="Drag to resize · double-click to reset"
+            className="absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize touch-none transition-colors hover:bg-accent/30 active:bg-accent/40 lg:block" />}
+          <ChatPanel key={ws.id} ws={ws} toast={setToast} max={chatMax} visible={chatOpen} onToggleMax={() => setChatMax((x) => !x)} onMinimize={() => { setChatOpen(false); setChatMax(false); }} />
+        </aside>
 
         {!chatOpen && (
           <button onClick={() => setChatOpen(true)} title="Expand manager chat" aria-label="Expand manager chat"
