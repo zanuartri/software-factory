@@ -2,3 +2,6 @@ node_modules/
 ui/node_modules/
 ui/dist/
 *.log
+
+.factory/tickets/
+.factory/issues/
