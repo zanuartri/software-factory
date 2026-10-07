@@ -38,9 +38,10 @@
   },
   "default_harness": "omp",
   "max_workers": 5,
+  "cost_routing": false,
   "reviewer": {
     "harness": "omp",
-    "model": "anthropic/claude-sonnet-5-5"
+    "model": "openai-codex/gpt-6-sol"
   },
   "reviewer_order": [
     "omp",
@@ -49,10 +50,10 @@
   ],
   "reviewer_models": {
     "claude": "claude-opus-5-5",
-    "omp": "anthropic/claude-sonnet-5-5",
+    "omp": "openai-codex/gpt-6-sol",
     "commandcode": "xiaomi/mimo-v2.6-flash"
   },
-  "verify_cmd": "bun install --frozen-lockfile && bun test src && bunx tsc -p . && cd ui && bun install --frozen-lockfile && bunx tsc -p . --noEmit && bun run build",
+  "verify_cmd": "bun install --frozen-lockfile && (cd ui && bun install --frozen-lockfile) && bun test src && bunx tsc -p . && cd ui && bunx tsc -p . --noEmit && bun run build",
   "catalog": {
     "commandcode:deepseek/deepseek-v4.1-flash": {
       "cost": 1,

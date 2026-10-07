@@ -15,7 +15,8 @@
 13. Never run `factory`, `bun src/cli.ts` or `src/daemon.ts` yourself (the CLI auto-starts a daemon that disrupts live runs); test CLI behavior only via spawned processes with `FACTORY_PORT` set to a free port and a temp `FACTORY_HOME`. The manager does live checks.
 14. Forbidden paths: `bun.lock`, `ui/bun.lock`, `ui/dist/**`, `node_modules/**`, `.factory/**`, `.env*`.
 15. Changes to `plugin/**` or `harness/**` are prompts/contracts other agents read — edit only when the brief names them.
-16. Commits: conventional style `type(scope): summary` (feat, fix, polish, chore), lowercase, imperative.
+16. Commits: conventional style `type(scope): summary` (feat, fix, polish, chore), lowercase, imperative. The daemon squashes each ticket branch into one landing commit titled from the ticket, so subjects of branch commits and conflict-resolution merge commits are never reviewed or blocked on: do not amend or rename them.
 17. Tests that spawn `daemon.ts` or `cli.ts`: temp `FACTORY_HOME` set before imports, a free port, and accept `/health` only when its `pid` is the process you spawned (other suites run in parallel).
 18. A settings/routing change must keep behavior identical when the catalog is empty; say in the Report how you proved it.
 19. Timing assertions and test timeouts must hold on a loaded gate runner (full suite can run ~4× slower than locally): give spawn-based tests an explicit timeout ≥ 20000 and keep elapsed bounds ≥ 2× the documented worst case.
+20. A fresh worktree has no `node_modules`: run `bun install --frozen-lockfile` (and again inside `ui/` for UI work) before `bun test` or `bunx tsc`; it never changes `bun.lock`. A tsc "Cannot find type definition file for bun" error means you skipped this, not that the checkout is broken.
