@@ -9,7 +9,7 @@ export type ToolInfo = {
   result?: string; task?: string; agent?: AgentInfo; todos?: { content: string; status: string }[]; events?: string[];
 };
 export type Notice = { kind: "task" | "command" | "message"; status?: string; title: string; body?: string };
-export type Msg = { id: string; role: "user" | "assistant" | "tool" | "notice"; text: string; images?: number; qa?: QA[]; skipped?: boolean; tool?: ToolInfo; notice?: Notice };
+export type Msg = { id: string; role: "user" | "assistant" | "tool" | "notice"; text: string; ts?: number; images?: number; qa?: QA[]; skipped?: boolean; tool?: ToolInfo; notice?: Notice };
 /** A user message. `@<path>` mentions of uploaded images render as thumbnails; `images` counts images pasted in the terminal. */
 export function UserBubble({ text, images = 0, queued, local = [] }: { text: string; images?: number; queued?: boolean; local?: string[] }) {
   const urls: string[] = [];
@@ -92,7 +92,7 @@ export function AgentCard({ t }: { t: ToolInfo }) {
       </button>
       {open && (
         <div className="space-y-2 border-t border-border px-3 py-2.5">
-          {a.report ? <Md text={a.report} className="text-[12.5px]" /> : <p className="text-[12px] text-fg-subtle">{live ? "Still working — the report appears here when it hands back." : "No report."}</p>}
+          {a.report ? <Md text={a.report} className="text-[12.5px]" copyCode /> : <p className="text-[12px] text-fg-subtle">{live ? "Still working — the report appears here when it hands back." : "No report."}</p>}
           {t.input && <details className="text-[11px] text-fg-subtle"><summary className="cursor-pointer">Brief</summary><pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono">{t.input}</pre></details>}
         </div>
       )}

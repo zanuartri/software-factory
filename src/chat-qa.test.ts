@@ -35,6 +35,23 @@ const use = (id: string, name: string, input: unknown) => ({ type: "assistant", 
 const result = (id: string, content: unknown, tur?: unknown, extra: object = {}) => ({ type: "user", uuid: `r-${id}`, message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content, ...extra }] }, toolUseResult: tur });
 const note = (uuid: string, xml: string) => ({ type: "user", uuid, message: { role: "user", content: xml } });
 const write = (name: string, rows: object[]) => writeFileSync(join(home, ".claude", "projects", "p", `${name}.jsonl`), rows.map((r) => JSON.stringify(r)).join("\n"));
+
+test("readChat carries transcript timestamps on user, assistant, and notice rows", () => {
+  write("s-timestamps", [
+    { type: "user", uuid: "u-ts", timestamp: "2026-02-01T10:00:00.000Z", message: { role: "user", content: "hello" } },
+    { type: "assistant", uuid: "a-ts", timestamp: "2026-02-01T10:01:00.000Z", message: { role: "assistant", content: [{ type: "text", text: "reply" }] } },
+    { type: "user", uuid: "n-ts", timestamp: "2026-02-01T10:02:00.000Z", message: { role: "user", content: "<bash-stdout>ok</bash-stdout>" } },
+    { type: "assistant", uuid: "a-no-ts", message: { role: "assistant", content: [{ type: "text", text: "untimed reply" }] } },
+    { type: "user", uuid: "u-no-ts", message: { role: "user", content: "untimed" } },
+  ]);
+  expect(readChat("s-timestamps").msgs.map(({ id, ts }) => [id, ts])).toEqual([
+    ["u-ts", Date.parse("2026-02-01T10:00:00.000Z")],
+    ["a-ts:0", Date.parse("2026-02-01T10:01:00.000Z")],
+    ["n-ts", Date.parse("2026-02-01T10:02:00.000Z")],
+    ["a-no-ts:0", undefined],
+    ["u-no-ts", undefined],
+  ]);
+});
 test("readChat reports the full row count and returns the requested tail", () => {
   write("s-limit", [note("u1", "first"), note("u2", "second"), note("u3", "third")]);
   expect(readChat("s-limit", 2)).toMatchObject({ total: 3, msgs: [{ id: "u2", text: "second" }, { id: "u3", text: "third" }] });

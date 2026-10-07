@@ -12,7 +12,7 @@ export type ToolInfo = {
   result?: string; task?: string; agent?: AgentInfo; todos?: Todo[]; events?: string[]; // Monitor: lines it reported
 };
 export type Notice = { kind: "task" | "command" | "message"; status?: string; title: string; body?: string };
-export type ChatMsg = { id: string; role: "user" | "assistant" | "tool" | "notice"; text: string; images?: number; qa?: QA[]; skipped?: boolean; tool?: ToolInfo; notice?: Notice };
+export type ChatMsg = { id: string; role: "user" | "assistant" | "tool" | "notice"; text: string; ts?: number; images?: number; qa?: QA[]; skipped?: boolean; tool?: ToolInfo; notice?: Notice };
 export type Activity = { running: { name: string; detail: string } | null; background: number };
 
 const PROJECTS = join(homedir(), ".claude", "projects");
@@ -32,6 +32,11 @@ const INJECTED = /^<(system-reminder|local-command|command-|task-notification|ag
 // Injected blocks note() renders as their own row: keep them past the per-block filter instead of dropping the reminder.
 const ROUTE = /^<(task-notification|command-|local-command-stdout|agent-message|teammate-message)/;
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
+const timestamp = (entry: unknown) => {
+  if (!entry || typeof entry !== "object" || !("timestamp" in entry) || typeof entry.timestamp !== "string") return undefined;
+  const ts = Date.parse(entry.timestamp);
+  return Number.isFinite(ts) ? ts : undefined;
+};
 const textOf = (c: unknown): string => (typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("\n") : "");
 const tag = (xml: string, name: string) => xml.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`))?.[1].trim() ?? "";
 const detailOf = (name: string, i: any) => {
@@ -112,6 +117,7 @@ export function readChat(session: string, limit = 300): Read {
   for (const line of readFileSync(f, "utf8").split("\n")) {
     if (!line) continue;
     let e: any; try { e = JSON.parse(line); } catch { continue; }
+    const ts = timestamp(e);
     if (e.type === "queue-operation") {
       const c = String(e.content ?? "");
       if (e.operation === "enqueue") queue.push(c);
@@ -119,10 +125,9 @@ export function readChat(session: string, limit = 300): Read {
       else if (e.operation === "remove") { const i = queue.indexOf(c); if (i >= 0) queue.splice(i, 1); }
       continue;
     }
-    if (e.type === "attachment" && e.attachment?.type === "queued_command") { note(String(e.attachment.prompt ?? "").trim(), e.uuid ?? `q-${msgs.length}`); continue; }
+    if (e.type === "attachment" && e.attachment?.type === "queued_command") { const before = msgs.length; note(String(e.attachment.prompt ?? "").trim(), e.uuid ?? `q-${msgs.length}`); if (ts !== undefined) for (const m of msgs.slice(before)) m.ts = ts; continue; }
     if (e.type === "system") { // a built-in slash command's own entries: /reload-plugins, /model… carry no message field
-      if (!e.isSidechain && e.subtype === "local_command" && typeof e.content === "string" && (e.content.includes("<local-command-stdout>") || e.content.includes("<command-name>")))
-        note(e.content, e.uuid ?? `s-${msgs.length}`);
+      if (!e.isSidechain && e.subtype === "local_command" && typeof e.content === "string" && (e.content.includes("<local-command-stdout>") || e.content.includes("<command-name>"))) { const before = msgs.length; note(e.content, e.uuid ?? `s-${msgs.length}`); if (ts !== undefined) for (const m of msgs.slice(before)) m.ts = ts; }
       continue;
     }
     if (e.isSidechain || !e.message) continue;
@@ -163,22 +168,22 @@ export function readChat(session: string, limit = 300): Read {
       for (const t of texts) if (t.trim()) {
         const before = msgs.length;
         note(t.trim(), n ? `${e.uuid}:${n}` : e.uuid, e.isMeta);
-        if (msgs.length > before) n++;
+        if (msgs.length > before) { if (ts !== undefined) msgs.at(-1)!.ts = ts; n++; }
       }
-      if (images) { const m = msgs.at(-1); if (raw && m && m.id === e.uuid) m.images = images; else msgs.push({ id: `${e.uuid}:img`, role: "user", text: "", images }); }
+      if (images) { const m = msgs.at(-1); if (raw && m && m.id === e.uuid) m.images = images; else msgs.push({ id: `${e.uuid}:img`, role: "user", text: "", images, ...(ts !== undefined ? { ts } : {}) }); }
     } else if (e.type === "assistant" && Array.isArray(e.message.content)) {
       if (e.message.model && e.message.model !== "<synthetic>") model = e.message.model;
       e.message.content.forEach((b: any, i: number) => {
         const id = `${e.uuid}:${i}`;
-        if (b.type === "text" && b.text?.trim()) msgs.push({ id, role: "assistant", text: b.text });
+        if (b.type === "text" && b.text?.trim()) msgs.push({ id, role: "assistant", text: b.text, ...(ts !== undefined ? { ts } : {}) });
         else if (b.type === "tool_use" && b.name === "AskUserQuestion") {
-          const m: ChatMsg = { id, role: "tool", text: "AskUserQuestion", qa: (b.input?.questions ?? []).map((q: any) => ({ question: q.question, header: q.header, answer: null })) };
+          const m: ChatMsg = { id, role: "tool", text: "AskUserQuestion", ...(ts !== undefined ? { ts } : {}), qa: (b.input?.questions ?? []).map((q: any) => ({ question: q.question, header: q.header, answer: null })) };
           msgs.push(m); byId.set(b.id, m);
         } else if (b.type === "tool_use") {
           const tool: ToolInfo = { id: b.id, name: b.name, detail: detailOf(b.name, b.input), input: clip(JSON.stringify(b.input ?? {}, null, 2), 1500), status: "running" };
           if (b.name === "Agent" || b.name === "Task") tool.agent = { id: null, type: b.input?.subagent_type ?? "agent", desc: b.input?.description ?? "", steps: 0, done: false };
           if (b.name === "TodoWrite") tool.todos = (b.input?.todos ?? []).map((t: any) => ({ content: t.content ?? t.activeForm ?? "", status: t.status ?? "pending" }));
-          const m: ChatMsg = { id, role: "tool", text: `${b.name} ${tool.detail}`.trim(), tool };
+          const m: ChatMsg = { id, role: "tool", text: `${b.name} ${tool.detail}`.trim(), ...(ts !== undefined ? { ts } : {}), tool };
           msgs.push(m); byId.set(b.id, m);
         }
       });

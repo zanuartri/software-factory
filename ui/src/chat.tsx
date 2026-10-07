@@ -20,7 +20,7 @@ const MessageRow = memo(function MessageRow({ m, latestTodo }: { m: Msg; latestT
   if (m.tool?.todos) return <TodoCard t={m.tool} latest={latestTodo} />;
   if (m.tool) return <ToolRow t={m.tool} />;
   if (m.role === "user") return <div className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-bubble px-3.5 py-2 text-[13px] text-on-bubble">{m.text}</div>;
-  return <Md text={m.text} className="break-words" />;
+  return <Md text={m.text} className="break-words" copyCode />;
 });
 
 const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wide, lastTodo, activity, start, answer, stick, limit, loadEarlier, loadingEarlier, loadError, retry }: {
@@ -49,6 +49,92 @@ const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wid
     update();
     return () => observer.disconnect();
   }, [stick]);
+  const [openToolRuns, setOpenToolRuns] = useState<Set<string>>(() => new Set());
+  const copy = useCallback(async (text: string) => {
+    try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; } } catch {}
+    const area = document.createElement("textarea");
+    area.value = text; area.style.position = "fixed"; area.style.opacity = "0"; document.body.append(area); area.select();
+    const ok = document.execCommand("copy"); area.remove();
+    return ok;
+  }, []);
+  const onCopyCode = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    const button = target.closest<HTMLButtonElement>("[data-copy-code]");
+    if (!button || !e.currentTarget.contains(button)) return;
+    const code = button.closest("[data-code-block]")?.querySelector("code")?.textContent ?? "";
+    void copy(code).then((ok) => {
+      if (!ok) return;
+      button.dataset.copied = "true"; button.textContent = "Copied";
+      window.setTimeout(() => { button.dataset.copied = ""; button.textContent = "Copy"; }, 1500);
+    });
+  }, [copy]);
+  const toggleToolRun = useCallback((id: string) => setOpenToolRuns((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  }), []);
+  const timeLabel = (ts: number) => {
+    const date = new Date(ts), today = new Date();
+    const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    const days = Math.floor((new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() - new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()) / 86400000);
+    return days > 0 ? `${days === 1 ? "yesterday" : date.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}` : time;
+  };
+  const copyMessage = useCallback((button: HTMLButtonElement, text: string) => {
+    void copy(text).then((ok) => {
+      if (!ok) return;
+      button.textContent = "Copied";
+      window.setTimeout(() => { button.textContent = "Copy"; }, 1500);
+    });
+  }, [copy]);
+  const rows: (Msg | { id: string; run: Msg[] })[] = [];
+  for (let i = 0; i < msgs.length;) {
+    if (msgs[i].tool) {
+      let end = i + 1;
+      while (end < msgs.length && msgs[end].tool) end++;
+      if (end - i >= 3) { rows.push({ id: msgs[i].id, run: msgs.slice(i, end) }); i = end; continue; }
+    }
+    rows.push(msgs[i]); i++;
+  }
+  let priorTs: number | undefined;
+  const renderedRows = rows.map((row) => {
+    if ("run" in row) {
+      const run = row.run, open = openToolRuns.has(row.id), firstTs = run.find((m) => m.ts !== undefined)?.ts, runTs = run.at(-1)?.ts ?? firstTs;
+      const separator = firstTs !== undefined && priorTs !== undefined && firstTs - priorTs > 30 * 60 * 1000;
+      if (runTs !== undefined) priorTs = runTs;
+      const separatorLabel = firstTs === undefined ? null : timeLabel(firstTs);
+      const label = runTs === undefined ? null : timeLabel(runTs);
+      const flagged = run.some((m) => m.tool?.status === "running" || m.tool?.status === "background" || m.tool?.status === "error");
+      return <div key={row.id}>
+        {separator && <div className="py-1 text-center text-[10.5px] text-fg-subtle">{separatorLabel}</div>}
+        <div className={`group relative ${flagged ? "rounded-md border border-warning/40 bg-warning/5 px-2" : ""}`}>
+          <button type="button" aria-expanded={open} onClick={() => toggleToolRun(row.id)} className="flex w-full items-center gap-1.5 py-1 text-left text-[11.5px] font-medium text-fg-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">
+            <span aria-hidden className={`transition-transform ${open ? "rotate-90" : ""}`}>›</span>{run.length} tool calls
+            {flagged && <span className="text-warning">· active or failed</span>}
+            {label && <time dateTime={new Date(runTs!).toISOString()} className="ml-auto text-[10px] font-normal text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">{label}</time>}
+          </button>
+          {open && <div className="space-y-2">{run.map((m) => <div key={m.id} className="group relative">
+            <MessageRow m={m} latestTodo={m.id === lastTodo} />
+            {m.ts !== undefined && <time dateTime={new Date(m.ts).toISOString()} className="pointer-events-none absolute -top-3 right-1 text-[10px] text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100">{timeLabel(m.ts)}</time>}
+          </div>)}</div>}
+        </div>
+      </div>;
+    }
+    const m = row;
+    const separator = m.ts !== undefined && priorTs !== undefined && m.ts - priorTs > 30 * 60 * 1000;
+    if (m.ts !== undefined) priorTs = m.ts;
+    const label = m.ts === undefined ? null : timeLabel(m.ts);
+    const assistant = m.role === "assistant" && !m.tool;
+    const assistantCode = assistant && m.text.trimStart().startsWith("```");
+    return <div key={m.id} className={`group relative ${assistantCode ? "pt-6" : ""}`}>
+      {separator && <div className="py-1 text-center text-[10.5px] text-fg-subtle">{label}</div>}
+      <MessageRow m={m} latestTodo={m.id === lastTodo} />
+      {label && <time dateTime={new Date(m.ts!).toISOString()} className="pointer-events-none absolute -top-3 right-1 text-[10px] text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100">{label}</time>}
+      {assistant && <button type="button" aria-label="Copy assistant message" onClick={(e) => copyMessage(e.currentTarget, m.text)} className="absolute right-1 top-1 z-10 rounded bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted opacity-0 shadow-sm transition-opacity hover:text-fg focus:opacity-100 group-hover:opacity-100 focus-visible:outline-2 focus-visible:outline-accent">Copy</button>}
+    </div>;
+  });
+  const onCopyClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("[data-copy-code]")) onCopyCode(e);
+  }, [onCopyCode]);
   const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
@@ -63,7 +149,7 @@ const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wid
   return (
     <div className="relative min-h-0 flex-1">
       <div ref={scroller} role="log" aria-label="Chat messages" aria-live="polite" aria-relevant="additions" onScroll={onScroll} className="h-full overflow-y-auto px-3 py-3">
-        <div ref={content} className={`flex min-h-full flex-col justify-end gap-3 ${wide}`}>
+        <div ref={content} onClick={onCopyClick} className={`flex min-h-full flex-col justify-end gap-3 ${wide}`}>
           {loadError && !chat && (
             <div role="alert" className="grid flex-1 place-items-center text-center">
               <div>
@@ -91,7 +177,7 @@ const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wid
             </div>
           )}
           {!chat && !loadError && <div className="text-center text-[13px] text-fg-muted">Loading chat…</div>}
-          {msgs.map((m) => <MessageRow key={m.id} m={m} latestTodo={m.id === lastTodo} />)}
+          {renderedRows}
           {(chat?.queued ?? []).map((q, i) => <UserBubble key={`q${i}`} text={q} queued />)}
           {pending.map((p) => <UserBubble key={p.key} text={p.text} local={p.imgs} queued={st === "working"} />)}
           {chat?.prompt && <AskCard key={promptSignature(chat.prompt)} prompt={chat.prompt} send={answer} busy={busy} />}

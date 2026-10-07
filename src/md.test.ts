@@ -32,3 +32,13 @@ test("keeps tables, fenced code, lists, and inline code rendering", () => {
   expect(html).toContain("<ul>");
   expect(html).toContain("<code>inline</code>");
 });
+
+test("code-copy controls are opt-in for chat Markdown", () => {
+  const source = "```ts\nconst n = 1;\n```";
+  const ordinary = renderMd(source);
+  const chat = renderMd(source, true);
+  expect(ordinary).not.toContain("data-copy-code");
+  expect(ordinary).not.toContain("Copy</button>");
+  expect(chat).toContain('data-copy-code aria-label="Copy code"');
+  expect(chat).toContain('<pre><code class="language-ts">const n = 1;</code></pre>');
+});

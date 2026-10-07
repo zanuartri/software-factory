@@ -79,8 +79,8 @@ export function StatusIcon({ status, size = 14 }: { status: string; size?: numbe
   );
 }
 
-export const Md = memo(function Md({ text, className = "" }: { text: string; className?: string }) {
-  const html = useMemo(() => renderMd(text || ""), [text]);
+export const Md = memo(function Md({ text, className = "", copyCode = false }: { text: string; className?: string; copyCode?: boolean }) {
+  const html = useMemo(() => renderMd(text || "", copyCode), [text, copyCode]);
   return <div className={`md ${className}`} dangerouslySetInnerHTML={{ __html: html }} />;
 });
 
