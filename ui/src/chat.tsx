@@ -9,6 +9,7 @@ import { Btn, Dot, Md } from "./ui";
 type Chat = { rev: string; session: string | null; pane?: string | null; status: string; model?: string | null; activity?: Activity; queued?: string[]; prompt?: Prompt | { raw: string } | null; suggestion?: string | null; usage?: { ctx: (Meter & { used: string; size: string }) | null; h5: Meter | null; d7: Meter | null } | null; messages: Msg[] };
 type Cmd = { name: string; desc: string };
 type Pending = { key: string; text: string; imgs: string[]; after: string | null };
+const promptSignature = (prompt: Prompt | { raw: string }) => "raw" in prompt ? prompt.raw : JSON.stringify([prompt.title, prompt.tabs.map((tab) => tab.label)]);
 
 const MessageRow = memo(function MessageRow({ m, latestTodo }: { m: Msg; latestTodo: boolean }) {
   if (m.role === "user" && !m.qa) return <UserBubble text={m.text} images={m.images} />;
@@ -49,7 +50,7 @@ const ChatThread = memo(function ChatThread({ chat, pending, st, live, busy, wid
           {msgs.map((m) => <MessageRow key={m.id} m={m} latestTodo={m.id === lastTodo} />)}
           {(chat?.queued ?? []).map((q, i) => <UserBubble key={`q${i}`} text={q} queued />)}
           {pending.map((p) => <UserBubble key={p.key} text={p.text} local={p.imgs} queued={st === "working"} />)}
-          {chat?.prompt && <AskCard prompt={chat.prompt} send={answer} busy={busy} />}
+          {chat?.prompt && <AskCard key={promptSignature(chat.prompt)} prompt={chat.prompt} send={answer} busy={busy} />}
           {live && !chat?.prompt && (st === "working" || (activity?.background ?? 0) > 0) && (
             <div className="flex min-w-0 items-center gap-1.5 text-[12px] text-fg-subtle">
               <Dot on={st === "working"} pulse color="var(--warning)" />
@@ -117,6 +118,12 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const dragDepth = useRef(0);
   const picker = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [optimisticModel, setOptimisticModel] = useState<{ value: string; base: string | null } | null>(null);
+  const modelTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const answerTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const answeringPrompt = useRef<string | null>(null);
+  const lastCmdFetch = useRef(0);
+  const previousQ = useRef<string | null>(null);
   const [cmds, setCmds] = useState<Cmd[]>([]);
   const [sel, setSel] = useState(0);
   const [menuOff, setMenuOff] = useState(false);
@@ -156,7 +163,40 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
     const t = setInterval(() => { if (!document.hidden && !inflight.current) load(); }, 1500);
     return () => clearInterval(t);
   }, [load, ws.manager]);
-  useEffect(() => { api<Cmd[]>(`${base}/commands`).then(setCmds).catch(() => {}); }, [base]);
+  const refreshCommands = useCallback(() => { lastCmdFetch.current = Date.now(); api<Cmd[]>(`${base}/commands`).then(setCmds).catch(() => {}); }, [base]);
+  const q = /^\/\S*$/.test(text) && !menuOff ? text.slice(1).toLowerCase() : null;
+  useEffect(() => {
+    if (q !== null && previousQ.current === null && Date.now() - lastCmdFetch.current >= 5000) refreshCommands();
+    previousQ.current = q;
+  }, [q, refreshCommands]);
+  useEffect(() => { refreshCommands(); }, [refreshCommands]);
+  useEffect(() => {
+    if (optimisticModel && (chat?.model ?? null) !== optimisticModel.base) { setOptimisticModel(null); clearTimeout(modelTimer.current); }
+  }, [chat?.model, optimisticModel]);
+  useEffect(() => () => { clearTimeout(modelTimer.current); clearTimeout(answerTimer.current); }, []);
+  useEffect(() => {
+    const signature = chat?.prompt ? promptSignature(chat.prompt) : null;
+    if (answeringPrompt.current !== null && signature !== answeringPrompt.current) {
+      answeringPrompt.current = null;
+      clearTimeout(answerTimer.current);
+      setBusy(false);
+    }
+  }, [chat?.prompt]);
+  const answer = useCallback(async (a: Answer) => {
+    if (busy || answeringPrompt.current !== null || !chat?.prompt) return;
+    answeringPrompt.current = promptSignature(chat.prompt);
+    setBusy(true);
+    clearTimeout(answerTimer.current);
+    answerTimer.current = setTimeout(() => { answeringPrompt.current = null; setBusy(false); }, 3000);
+    try {
+      await api(`${base}/answer`, { body: a });
+      await new Promise<void>((resolve) => setTimeout(resolve, 400));
+      await load();
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : String(e));
+      clearTimeout(answerTimer.current); answeringPrompt.current = null; setBusy(false);
+    }
+  }, [base, busy, chat?.prompt, load, toast]);
   useEffect(() => {
     const onDrag = (e: DragEvent) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); };
     addEventListener("dragover", onDrag); addEventListener("drop", onDrag);
@@ -184,7 +224,6 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
     try { await fn(); if (ok) toast(ok); await load(); } catch (e: unknown) { toast(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }, [load, toast]);
   const start = useCallback((resume: boolean) => act(() => api(`${base}/start`, { body: { resume } }), resume ? "Session resumed in herdr" : "New session started in herdr"), [act, base]);
-  const answer = useCallback((a: Answer) => act(() => api(`${base}/answer`, { body: a })), [act, base]);
   const addFiles = (list: File[]) => {
     let slots = Math.max(0, 6 - files.length);
     for (const f of list) {
@@ -206,19 +245,28 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
   const uploading = files.some((f) => !f.path);
   const mention = (p: string) => (p.includes(" ") ? `@"${p}"` : `@${p}`);
   const send = (raw = text, interrupt = false) => {
-    const typed = raw.trim(), atts = raw === text ? files : [];
+    const programmatic = raw !== text, typed = raw.trim(), atts = programmatic ? [] : files;
     if ((!typed && !atts.length) || busy || atts.some((f) => !f.path)) return;
     const t = [typed || "Please look at the attached image" + (atts.length > 1 ? "s." : "."), ...atts.map((f) => mention(f.path!))].join("\n");
     const key = crypto.randomUUID(), after = (chat?.messages ?? []).filter((m) => m.role === "user").at(-1)?.id ?? null;
-    setText(""); setFiles([]); setPending((ps) => [...ps, { key, text: t, imgs: atts.map((f) => f.blob), after }]); stick.current = true;
-    api(base, { body: { text: t, interrupt } }).then(load).catch((e: unknown) => { setPending((ps) => ps.filter((p) => p.key !== key)); setText(typed); setFiles(atts); toast(e instanceof Error ? e.message : String(e)); });
+    if (!programmatic) { setText(""); setFiles([]); setPending((ps) => [...ps, { key, text: t, imgs: atts.map((f) => f.blob), after }]); stick.current = true; }
+    api(base, { body: { text: t, interrupt } }).then(() => { load(); if (typed.startsWith("/reload-plugins")) refreshCommands(); }).catch((e: unknown) => {
+      if (!programmatic) { setPending((ps) => ps.filter((p) => p.key !== key)); setText(typed); setFiles(atts); }
+      toast(e instanceof Error ? e.message : String(e));
+    });
   };
-  const q = /^\/\S*$/.test(text) && !menuOff ? text.slice(1).toLowerCase() : null;
   const matches = q === null ? [] : cmds.filter((c) => c.name.toLowerCase().includes(q)).sort((a, b) => Number(b.name.toLowerCase().startsWith(q)) - Number(a.name.toLowerCase().startsWith(q)));
   const pick = (c: Cmd) => { setText(`/${c.name} `); setSel(0); };
-  const models = useMemo(() => [...new Set([chat?.model, ...(ws.settings?.harnesses?.claude?.models ?? ["sonnet", "opus", "haiku"])].filter(Boolean) as string[])], [chat?.model, ws.settings]);
   const st = chat?.prompt ? "blocked" : chat?.status ?? "offline";
   const live = !!chat?.pane, meta = STATUS[st], msgs = chat?.messages ?? [];
+  const models = useMemo(() => [...new Set([chat?.model, ...(ws.settings?.harnesses?.claude?.models ?? ["sonnet", "opus", "haiku"])].filter(Boolean) as string[])], [chat?.model, ws.settings]);
+  const chooseModel = (m: string) => {
+    if (!live || chat?.prompt || chat?.status === "blocked" || chat?.status === "working") return;
+    setOptimisticModel({ value: m, base: chat?.model ?? null });
+    clearTimeout(modelTimer.current);
+    modelTimer.current = setTimeout(() => setOptimisticModel(null), 15000);
+    api(base, { body: { text: `/model ${m}` } }).then(() => load()).catch((e: unknown) => toast(e instanceof Error ? e.message : String(e)));
+  };
   const lastTodo = useMemo(() => [...msgs].reverse().find((m) => m.tool?.todos)?.id, [msgs]);
   const activity = chat?.activity;
   const suggestion = chat?.suggestion && !text && !pending.length && (st === "idle" || st === "done") ? chat.suggestion : null;
@@ -279,8 +327,8 @@ export function ChatPanel({ ws, toast, max, onToggleMax, onMinimize }: { ws: Wor
               }}
               className="no-ring block max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[13.5px] leading-relaxed text-fg outline-none placeholder:text-fg-subtle disabled:opacity-50" />
             <div className="flex items-center gap-1 px-2 pb-2">
-              <Select variant="bare" className="h-7 max-w-[200px] px-2! py-0! text-[12px] text-fg-muted" ariaLabel="model" value={chat?.model ?? ""} disabled={!live || st === "working"}
-                options={models.map((m) => ({ value: m, label: m }))} onChange={(m) => send(`/model ${m}`)} placeholder="Model" />
+              <Select variant="bare" className="h-7 max-w-[200px] px-2! py-0! text-[12px] text-fg-muted" ariaLabel="model" value={optimisticModel?.value ?? chat?.model ?? ""} disabled={!live || st === "working" || !!chat?.prompt || st === "blocked"}
+                options={models.map((m) => ({ value: m, label: m }))} onChange={chooseModel} placeholder="Model" />
               <button type="button" title="Attach image (or paste / drop one)" aria-label="Attach image" disabled={!live || !!chat?.prompt} onClick={() => picker.current?.click()}
                 className="grid size-7 place-items-center rounded-lg text-fg-muted transition-colors hover:bg-hover hover:text-fg disabled:opacity-40"><Paperclip className="size-4" /></button>
               <input ref={picker} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = ""; }} />

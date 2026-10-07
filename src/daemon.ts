@@ -112,12 +112,20 @@ const routes: Record<string, Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "
       const w = sup.mustWs(req.params.ws), agent = await managerAgent(w);
       if (!agent) throw new Error("manager session is not running in herdr — start or resume one");
       const b = await body(req);
+      if (agent.agent_status === "blocked") throw new Error("manager is waiting for an answer; use /chat/answer");
+      const ansiScreen = await herdr.readAnsiScreen(agent.pane_id);
+      const screen = ansiScreen.replace(/\x1b\[[0-9;]*m/g, "");
+      if (await herdr.promptFrom(agent.pane_id, screen, false, ansiScreen)) throw new Error("manager is waiting for an answer; use /chat/answer");
       if (b.interrupt && agent.agent_status === "working") {
         await herdr.interrupt(agent.pane_id);
         await Bun.sleep(450);
         const fresh = await managerAgent(w);
-        await herdr.prompt(agent.pane_id, b.text, fresh?.agent_status !== "blocked");
-      } else await herdr.prompt(agent.pane_id, b.text, agent.agent_status !== "blocked");
+        if (!fresh || fresh.agent_status === "blocked") throw new Error("manager is waiting for an answer; use /chat/answer");
+        const freshAnsi = await herdr.readAnsiScreen(fresh.pane_id);
+        const freshScreen = freshAnsi.replace(/\x1b\[[0-9;]*m/g, "");
+        if (await herdr.promptFrom(fresh.pane_id, freshScreen, false, freshAnsi)) throw new Error("manager is waiting for an answer; use /chat/answer");
+        await herdr.prompt(fresh.pane_id, b.text, true);
+      } else await herdr.prompt(agent.pane_id, b.text, true);
       herdr.noteSent(b.text); // /reload-plugins re-reads the plugin dirs, so the autocomplete must rescan instead of serving the 30s cache
       return json({ ok: true });
     },

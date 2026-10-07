@@ -96,8 +96,8 @@ export function AskCard({ prompt, send, busy }: { prompt: Prompt | { raw: string
 
       <div className="mt-3 flex items-center gap-1.5">
         <button type="button" disabled={busy} onClick={() => send({ keys: ["esc"] })} className={`${btn} text-fg-muted hover:bg-hover hover:text-fg`} title="Esc — skip / cancel"><X className="size-3.5" />Skip</button>
-        {prompt.amend && <button type="button" onClick={() => setAmend((a) => !a)} className={`${btn} text-fg-muted hover:bg-hover hover:text-fg`} title="Tab — approve with an instruction">Add instruction</button>}
-        {prompt.notes && <button type="button" onClick={() => setNoting((n) => !n)} className={`${btn} text-fg-muted hover:bg-hover hover:text-fg`} title="n — add notes to the highlighted option">Add notes</button>}
+        {prompt.amend && <button type="button" disabled={busy} onClick={() => setAmend((a) => !a)} className={`${btn} text-fg-muted hover:bg-hover hover:text-fg`} title="Tab — approve with an instruction">Add instruction</button>}
+        {prompt.notes && <button type="button" disabled={busy} onClick={() => setNoting((n) => !n)} className={`${btn} text-fg-muted hover:bg-hover hover:text-fg`} title="n — add notes to the highlighted option">Add notes</button>}
         {previewMode && <button type="button" disabled={busy} onClick={() => send({ keys: ["enter"] })} className={`${btn} ml-auto bg-primary text-primary-fg hover:opacity-90`}>Select<CornerDownLeft className="size-3.5" /></button>}
         {prompt.multi && <button type="button" disabled={busy} onClick={() => send({ keys: ["right"] })} className={`${btn} ml-auto bg-primary text-primary-fg hover:opacity-90`}>Next<ArrowRight className="size-3.5" /></button>}
       </div>

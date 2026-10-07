@@ -104,8 +104,9 @@ export function Select({ value, onChange, options, placeholder = "Select…", ar
   variant?: keyof typeof triggerCls; renderValue?: (o: Opt | undefined) => ReactNode; searchable?: boolean; className?: string; chevronClass?: string; disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const close = () => { setOpen(false); pop.trigger.current?.focus(); };
   const pop = usePopover(open, () => setOpen(false));
+  useLayoutEffect(() => { if (disabled) setOpen(false); }, [disabled]);
+  const close = () => { setOpen(false); pop.trigger.current?.focus(); };
   const cur = options.find((o) => o.value === value);
   return (
     <>
@@ -118,7 +119,7 @@ export function Select({ value, onChange, options, placeholder = "Select…", ar
         </>}
         <ChevronDown className={`size-3.5 shrink-0 text-fg-subtle ${chevronClass}`} />
       </button>
-      {open && pop.pos && createPortal(
+      {open && !disabled && pop.pos && createPortal(
         <div ref={pop.panel} className="fade-up fixed z-[60] flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-lg)]"
           style={{ left: pop.pos.left, top: pop.pos.top, bottom: pop.pos.bottom, width: pop.pos.width, maxHeight: pop.pos.maxH }}>
           <List options={options} isOn={(v) => v === value} searchable={searchable ?? options.length > 8}

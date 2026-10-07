@@ -141,6 +141,7 @@ function fakeHerdr() {
     `const marker = join(import.meta.dir, "started.txt");`,
     `const status = join(import.meta.dir, "status.txt");`,
     `const nextStatus = join(import.meta.dir, "next-status.txt");`,
+    `const nextScreen = join(import.meta.dir, "next-screen.txt");`,
     `const keys = join(import.meta.dir, "keys.log");`,
     `const [cmd, sub] = process.argv.slice(2);`,
     `if (cmd === "workspace") { writeFileSync(marker, "1"); console.log(JSON.stringify({ result: { root_pane: { pane_id: "fake-pane" } } })); }`,
@@ -153,7 +154,7 @@ function fakeHerdr() {
     `  console.log(JSON.stringify({ result: { agents } }));`,
     `}`,
     `else if (cmd === "agent" && sub === "read") { const screen = join(import.meta.dir, "screen.txt"); console.log(existsSync(screen) ? readFileSync(screen, "utf8") : process.argv.includes("--format") ? "❯ \\x1b[0m\\x1b[2mSuggested next prompt\\x1b[0m" : "❯ Suggested next prompt"); }`,
-    `else if (cmd === "agent" && sub === "send-keys") { appendFileSync(keys, process.argv.slice(5).join(" ") + "\\n"); if (process.argv[5] === "esc" && existsSync(nextStatus)) writeFileSync(status, readFileSync(nextStatus, "utf8")); }`,
+    `else if (cmd === "agent" && sub === "send-keys") { appendFileSync(keys, process.argv.slice(5).join(" ") + "\\n"); if (process.argv[5] === "esc") { if (existsSync(nextStatus)) writeFileSync(status, readFileSync(nextStatus, "utf8")); if (existsSync(nextScreen)) writeFileSync(join(import.meta.dir, "screen.txt"), readFileSync(nextScreen, "utf8")); } }`,
     `else if (cmd === "agent" && sub === "prompt") appendFileSync(keys, "prompt:" + process.argv.slice(5).join(" ") + "\\n");`,
     `else process.exit(0);`,
   ].join("\n") + "\n");
@@ -245,6 +246,29 @@ test("GET chat for an unknown workspace is a 400", async () => {
     expect(res.status).toBe(400);
   } finally { await d.stop(); }
 }, 30000);
+test("chat rejects plain text while the manager is blocked", async () => {
+  const d = await daemonWithFakeHerdr({});
+  try {
+    const w = await registerRepo(d.post);
+    writeFileSync(d.fake.marker, "1");
+    await d.post(`/api/ws/${w.id}/attach`, { session: "s1", force: true });
+    writeFileSync(d.fake.status, "blocked");
+    const res = await d.post(`/api/ws/${w.id}/chat`, { text: "change the model" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "manager is waiting for an answer; use /chat/answer" });
+    expect(existsSync(d.fake.keys)).toBe(false);
+    const answer = await d.post(`/api/ws/${w.id}/chat/answer`, { keys: ["1"], enter: true });
+    expect(answer.status).toBe(200);
+    expect(readFileSync(d.fake.keys, "utf8")).toBe("1\nenter\n");
+    writeFileSync(d.fake.status, "done");
+    writeFileSync(join(d.fake.dir, "screen.txt"), "Pick a color?\n❯ 1. Green\n  2. Blue\nEnter to select · ↑/↓ to navigate · Esc to cancel");
+    const promptRes = await d.post(`/api/ws/${w.id}/chat`, { text: "change the model" });
+    expect(promptRes.status).toBe(400);
+    expect(await promptRes.json()).toEqual({ error: "manager is waiting for an answer; use /chat/answer" });
+    expect(readFileSync(d.fake.keys, "utf8")).toBe("1\nenter\n");
+  } finally { await d.stop(); }
+}, 30000);
+
 
 test("no live pane: background tasks clear as done; a started pane reports them again", async () => {
   const d = await daemonWithFakeHerdr({});
@@ -319,22 +343,34 @@ test("chat/interrupt: no esc on an idle agent, and two at once send only one esc
   } finally { await d.stop(); }
 }, 30000);
 
-test("chat steer uses the post-interrupt status to decide whether to clear", async () => {
+test("chat steer rechecks status and dialogs after interrupt before prompting", async () => {
   const d = await daemonWithFakeHerdr({});
   try {
     const w = await registerRepo(d.post);
     await d.post(`/api/ws/${w.id}/chat/start`, { resume: false });
     const send = (text: string) => d.post(`/api/ws/${w.id}/chat`, { text, interrupt: true });
-    const keys = () => readFileSync(d.fake.keys, "utf8").trim().split("\n");
+    const keys = () => readFileSync(d.fake.keys, "utf8").trim().split("\n").filter(Boolean);
     writeFileSync(d.fake.status, "working");
     writeFileSync(join(d.fake.dir, "next-status.txt"), "blocked");
-    await send("blocked prompt");
-    expect(keys()).toEqual(["esc", "prompt:blocked prompt"]);
+    const blocked = await send("blocked prompt");
+    expect(blocked.status).toBe(400);
+    expect(keys()).toEqual(["esc"]);
 
     writeFileSync(d.fake.keys, "");
     writeFileSync(d.fake.status, "working");
     writeFileSync(join(d.fake.dir, "next-status.txt"), "done");
-    await send("done prompt");
+    writeFileSync(join(d.fake.dir, "next-screen.txt"), ["Pick a color?", "❯ 1. Green", "  2. Blue", "Enter to select · ↑/↓ to navigate · Esc to cancel"].join(String.fromCharCode(10)));
+    const dialog = await send("dialog prompt");
+    expect(dialog.status).toBe(400);
+    expect(keys()).toEqual(["esc"]);
+    expect(await dialog.json()).toEqual({ error: "manager is waiting for an answer; use /chat/answer" });
+
+    writeFileSync(d.fake.keys, "");
+    writeFileSync(d.fake.status, "working");
+    writeFileSync(join(d.fake.dir, "screen.txt"), "❯ Suggested next prompt");
+    writeFileSync(join(d.fake.dir, "next-screen.txt"), "❯ Suggested next prompt");
+    const clear = await send("done prompt");
+    expect(clear.status).toBe(200);
     expect(keys()).toEqual(["esc", "ctrl+u", "prompt:done prompt"]);
   } finally { await d.stop(); }
 }, 30000);
